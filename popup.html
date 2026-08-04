@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <title>813國軍桃園總醫院新竹分院 看診進度</title>
+    <link rel="stylesheet" href="shared.css" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body class="popup">
+    <header class="p-head">
+      <div class="p-head-text">
+        <div class="p-title">看診進度</div>
+        <div class="muted p-sub" id="updated">讀取中…</div>
+      </div>
+      <div class="p-head-actions">
+        <button id="btn-pause" class="icon-btn" title="暫停自動查詢" aria-label="暫停自動查詢"></button>
+        <button id="btn-refresh" class="icon-btn" title="立即重新查詢" aria-label="立即重新查詢"></button>
+      </div>
+    </header>
+
+    <div id="list" class="p-list"></div>
+
+    <footer class="p-foot">
+      <a href="#" id="link-options">設定監看診間</a>
+      <a href="http://www.813.com.tw/WebService/link/show_call2.html" target="_blank"
+        >開啟完整看診進度</a
+      >
+    </footer>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
