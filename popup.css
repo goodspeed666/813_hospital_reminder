@@ -70,8 +70,8 @@ body.popup {
   }
 }
 
-body.paused .p-title::after {
-  content: "已暫停";
+body.paused .p-title::after,
+body.idle .p-title::after {
   margin-left: 7px;
   padding: 1px 7px;
   border-radius: 999px;
@@ -80,6 +80,14 @@ body.paused .p-title::after {
   font-size: 11px;
   font-weight: 600;
   vertical-align: 2px;
+}
+
+body.paused .p-title::after {
+  content: "已暫停";
+}
+
+body.idle .p-title::after {
+  content: "今日已結束";
 }
 
 /* ---------------------------------------------------------------- 清單 */

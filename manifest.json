@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "813國軍桃園總醫院新竹分院 看診進度提醒",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "自動定時查詢國軍桃園總醫院新竹分院看診進度，指定的診間一有異動或快輪到你時立即通知。",
   "minimum_chrome_version": "116",
   "permissions": [

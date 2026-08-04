@@ -11,6 +11,9 @@ export const PAGE_URL = 'http://www.813.com.tw/WebService/link/show_call2.html';
 
 export const ALARM_NAME = 'poll-clinic-progress';
 
+// 監看的診間全部「看診結束」後，改用這個間隔慢慢確認就好（分鐘）
+export const IDLE_PERIOD_MINUTES = 30;
+
 // 時段顯示順序
 export const SHIFT_ORDER = ['上午', '下午', '晚上'];
 
@@ -120,12 +123,19 @@ export function groupRows(rows) {
 }
 
 export async function getStore() {
-  const s = await chrome.storage.local.get(['settings', 'watches', 'snapshot', 'states']);
+  const s = await chrome.storage.local.get([
+    'settings',
+    'watches',
+    'snapshot',
+    'states',
+    'pollMode'
+  ]);
   return {
     settings: { ...DEFAULT_SETTINGS, ...(s.settings || {}) },
     watches: s.watches || [],
     snapshot: s.snapshot || null,
-    states: s.states || {}
+    states: s.states || {},
+    pollMode: s.pollMode || 'active' // active = 正常輪詢；idle = 今日已看診結束
   };
 }
 

@@ -1,5 +1,6 @@
 import {
   ALARM_NAME,
+  IDLE_PERIOD_MINUTES,
   PAGE_URL,
   fetchProgress,
   getStore,
@@ -13,7 +14,10 @@ import {
 // ---------------------------------------------------------------- 生命週期
 
 chrome.runtime.onInstalled.addListener(async (details) => {
-  await setupAlarm();
+  // 重新啟動時先回到正常頻率，確認過今天的班表後才決定要不要轉為 idle，
+  // 否則昨天存下的 idle 狀態會讓今天早上慢半小時才發現診間開了
+  await chrome.storage.local.set({ pollMode: 'active' });
+  await setupAlarm('active');
   poll('installed');
   if (details.reason === 'install') {
     chrome.runtime.openOptionsPage();
@@ -21,7 +25,8 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 });
 
 chrome.runtime.onStartup.addListener(async () => {
-  await setupAlarm();
+  await chrome.storage.local.set({ pollMode: 'active' });
+  await setupAlarm('active');
   poll('startup');
 });
 
@@ -29,18 +34,38 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_NAME) poll('alarm');
 });
 
-async function setupAlarm() {
-  const { settings } = await getStore();
+async function setupAlarm(mode) {
+  const store = await getStore();
+  const settings = store.settings;
+  if (!mode) mode = store.pollMode;
   await chrome.alarms.clear(ALARM_NAME);
   if (settings.paused) {
     await updateBadge();
     return;
   }
+  // 監看的診間今天都已看診結束時，改成 30 分鐘確認一次就好（等隔天班表出來再恢復）
   // Chrome 對已封裝的擴充功能，週期下限為 0.5 分鐘（30 秒）
-  const period = Math.max(0.5, Number(settings.intervalMinutes) || 0.5);
+  const period =
+    mode === 'idle'
+      ? IDLE_PERIOD_MINUTES
+      : Math.max(0.5, Number(settings.intervalMinutes) || 0.5);
   chrome.alarms.create(ALARM_NAME, {
     delayInMinutes: period,
     periodInMinutes: period
+  });
+}
+
+/**
+ * 監看中的診間是否都已經沒有東西好追了。
+ * 「看診結束」或「今日班表沒有這個診」都算，兩者的進度都不會再變動。
+ */
+function nothingLeftToWatch(watches, byKey) {
+  const enabled = watches.filter((w) => w.enabled);
+  if (!enabled.length) return true; // 還沒設定監看目標，不用一直抓
+  return enabled.every((w) => {
+    const row = byKey.get(watchKey(w));
+    if (!row) return true;
+    return phaseOf(row.CLC_MAXIMUM) === 'finished';
   });
 }
 
@@ -57,7 +82,7 @@ function poll(reason) {
 }
 
 async function doPoll(reason) {
-  const { settings, watches, states } = await getStore();
+  const { settings, watches, states, pollMode } = await getStore();
   if (settings.paused && reason !== 'manual') return;
 
   let rows = null;
@@ -220,6 +245,22 @@ async function doPoll(reason) {
   }
 
   await chrome.storage.local.set({ states: nextStates });
+
+  // 監看的診間都看診結束了就停止密集查詢，改成 30 分鐘確認一次，
+  // 等隔天班表出來（或診間重新開診）再自動恢復原本的頻率。
+  const nextMode = nothingLeftToWatch(watches, byKey) ? 'idle' : 'active';
+  if (nextMode !== pollMode) await chrome.storage.local.set({ pollMode: nextMode });
+  if (!settings.paused) {
+    // 直接比對「實際的 alarm 週期」而不是只看模式有沒有變，
+    // 這樣即使狀態不同步（例如瀏覽器重啟、設定被外部改動）也會自我修正
+    const want =
+      nextMode === 'idle'
+        ? IDLE_PERIOD_MINUTES
+        : Math.max(0.5, Number(settings.intervalMinutes) || 0.5);
+    const cur = await chrome.alarms.get(ALARM_NAME);
+    if (!cur || cur.periodInMinutes !== want) await setupAlarm(nextMode);
+  }
+
   await updateBadge();
 
   if (events.length) {
@@ -297,7 +338,7 @@ async function playSound(urgent) {
 // ---------------------------------------------------------------- Badge
 
 async function updateBadge() {
-  const { settings, watches, snapshot } = await getStore();
+  const { settings, watches, snapshot, pollMode } = await getStore();
 
   if (!settings.badgeEnabled) {
     await chrome.action.setBadgeText({ text: '' });
@@ -358,6 +399,7 @@ async function updateBadge() {
     if (remaining <= th) color = remaining <= 0 ? '#dc2626' : '#ea580c';
   }
   if (snapshot?.stale) title += '\n（上次抓取失敗，顯示的是舊資料）';
+  if (pollMode === 'idle') title += `\n今日看診已結束，已停止密集查詢`;
 
   await chrome.action.setBadgeText({ text });
   await chrome.action.setBadgeBackgroundColor({ color });

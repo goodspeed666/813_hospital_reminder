@@ -64,18 +64,24 @@ async function togglePause() {
 }
 
 function render() {
-  const { settings, watches, snapshot } = store;
+  const { settings, watches, snapshot, pollMode } = store;
+  const idle = pollMode === 'idle' && watches.some((w) => w.enabled);
 
   const pauseBtn = $('#btn-pause');
   pauseBtn.innerHTML = settings.paused ? ICON_PLAY : ICON_PAUSE;
   pauseBtn.title = settings.paused ? '繼續自動查詢' : '暫停自動查詢';
   pauseBtn.setAttribute('aria-label', pauseBtn.title);
   document.body.classList.toggle('paused', !!settings.paused);
+  document.body.classList.toggle('idle', !settings.paused && idle);
 
   const every = settings.intervalMinutes === 0.5 ? '30 秒' : `${settings.intervalMinutes} 分鐘`;
-  $('#updated').textContent = settings.paused
-    ? `停留在 ${formatTime(snapshot?.fetchedAt)}・按播放鍵繼續`
-    : `${formatTime(snapshot?.fetchedAt)} 更新・每 ${every}自動查詢`;
+  if (settings.paused) {
+    $('#updated').textContent = `停留在 ${formatTime(snapshot?.fetchedAt)}・按播放鍵繼續`;
+  } else if (idle) {
+    $('#updated').textContent = `今日看診已結束・已停止查詢`;
+  } else {
+    $('#updated').textContent = `${formatTime(snapshot?.fetchedAt)} 更新・每 ${every}自動查詢`;
+  }
 
   const list = $('#list');
   list.innerHTML = '';
