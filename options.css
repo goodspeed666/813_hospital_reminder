@@ -16,6 +16,18 @@
   margin: 0;
 }
 
+.unofficial {
+  display: inline-block;
+  margin-left: 9px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  vertical-align: 3px;
+}
+
 .card + .card {
   margin-top: 16px;
 }
