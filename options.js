@@ -44,6 +44,7 @@ function applySettingsToForm() {
   $('#sound').checked = !!settings.sound;
   $('#require-interaction').checked = !!settings.requireInteraction;
   $('#badge-enabled').checked = !!settings.badgeEnabled;
+  $('#daily-reset').checked = settings.dailyReset !== false;
 }
 
 function bindEvents() {
@@ -62,6 +63,20 @@ function bindEvents() {
   $('#badge-enabled').addEventListener('change', (e) => {
     settings.badgeEnabled = e.target.checked;
     markDirty();
+  });
+  $('#daily-reset').addEventListener('change', (e) => {
+    settings.dailyReset = e.target.checked;
+    markDirty();
+  });
+  $('#btn-clear-watches').addEventListener('click', async () => {
+    if (!watchMap.size) return setStatus('目前沒有監看中的診間', 'ok');
+    watchMap.clear();
+    settings.badgeKey = null;
+    await chrome.storage.local.set({ watches: [], states: {}, settings });
+    await chrome.runtime.sendMessage({ type: 'settings-changed' });
+    dirty = false;
+    render();
+    setStatus('已清除監看清單', 'ok');
   });
   $('#badge-key').addEventListener('change', (e) => {
     settings.badgeKey = e.target.value || null;

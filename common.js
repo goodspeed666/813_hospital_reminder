@@ -14,6 +14,37 @@ export const ALARM_NAME = 'poll-clinic-progress';
 // 監看的診間全部「看診結束」後，改用這個間隔慢慢確認就好（分鐘）
 export const IDLE_PERIOD_MINUTES = 30;
 
+// 每天凌晨清除前一天紀錄用的排程
+export const DAILY_ALARM = 'daily-reset';
+export const TZ = 'Asia/Taipei';
+
+/** 台北時區的今天，格式 YYYYMMDD（與醫院 API 的日期欄位同格式） */
+export function todayInTaipei(now = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  })
+    .format(now)
+    .replace(/-/g, '');
+}
+
+/** 距離下一個台北午夜還有幾毫秒（多留 5 秒避開邊界） */
+export function msUntilTaipeiMidnight(now = new Date()) {
+  const [h, m, s] = new Intl.DateTimeFormat('en-GB', {
+    timeZone: TZ,
+    hourCycle: 'h23',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  })
+    .format(now)
+    .split(':')
+    .map(Number);
+  return 86400000 - (h * 3600 + m * 60 + s) * 1000 + 5000;
+}
+
 // 時段顯示順序
 export const SHIFT_ORDER = ['上午', '下午', '晚上'];
 
@@ -23,7 +54,8 @@ export const DEFAULT_SETTINGS = {
   sound: true,               // 通知音效
   requireInteraction: true,  // 通知不自動消失，需手動關閉
   badgeEnabled: true,        // 工具列圖示顯示目前號碼
-  badgeKey: null             // badge 要顯示哪一個監看項目（null = 第一個啟用的）
+  badgeKey: null,            // badge 要顯示哪一個監看項目（null = 第一個啟用的）
+  dailyReset: true           // 每天凌晨 00:00 自動清除前一天的診間與號碼
 };
 
 export const DEFAULT_WATCH = {
@@ -128,14 +160,16 @@ export async function getStore() {
     'watches',
     'snapshot',
     'states',
-    'pollMode'
+    'pollMode',
+    'day'
   ]);
   return {
     settings: { ...DEFAULT_SETTINGS, ...(s.settings || {}) },
     watches: s.watches || [],
     snapshot: s.snapshot || null,
     states: s.states || {},
-    pollMode: s.pollMode || 'active' // active = 正常輪詢；idle = 今日已看診結束
+    pollMode: s.pollMode || 'active', // active = 正常輪詢；idle = 今日已看診結束
+    day: s.day || null // 這份資料屬於哪一天（台北時間 YYYYMMDD）
   };
 }
 

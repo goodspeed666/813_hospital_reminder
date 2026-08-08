@@ -1,6 +1,9 @@
 import {
   ALARM_NAME,
+  DAILY_ALARM,
   IDLE_PERIOD_MINUTES,
+  msUntilTaipeiMidnight,
+  todayInTaipei,
   PAGE_URL,
   fetchProgress,
   getStore,
@@ -13,10 +16,35 @@ import {
 
 // ---------------------------------------------------------------- 生命週期
 
+/**
+ * 一次性修復：1.0.5 有個 bug，會在「沒有清掉過期資料」的情況下把 day 蓋成今天，
+ * 導致之後任何以日期為依據的判斷都認為那些資料是今天的，永遠清不掉。
+ * 沒有任何欄位還留著證據，所以只能用版本號做一次無條件清除，讓所有人回到乾淨狀態。
+ */
+const SCHEMA_VERSION = 2;
+
+async function repairIfNeeded() {
+  const { schemaVersion } = await chrome.storage.local.get('schemaVersion');
+  if (schemaVersion >= SCHEMA_VERSION) return false;
+  await chrome.storage.local.set({
+    watches: [],
+    states: {},
+    snapshot: null,
+    pollMode: 'active',
+    day: todayInTaipei(),
+    schemaVersion: SCHEMA_VERSION,
+    lastReset: { at: Date.now(), day: todayInTaipei(), reason: 'repair-v' + SCHEMA_VERSION }
+  });
+  return true;
+}
+
 chrome.runtime.onInstalled.addListener(async (details) => {
   // 重新啟動時先回到正常頻率，確認過今天的班表後才決定要不要轉為 idle，
   // 否則昨天存下的 idle 狀態會讓今天早上慢半小時才發現診間開了
   await chrome.storage.local.set({ pollMode: 'active' });
+  // 先做一次性修復，再走一般的跨日判斷
+  if (!(await repairIfNeeded())) await resetIfNewDay('installed');
+  await scheduleDailyReset();
   await setupAlarm('active');
   poll('installed');
   if (details.reason === 'install') {
@@ -26,13 +54,89 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 
 chrome.runtime.onStartup.addListener(async () => {
   await chrome.storage.local.set({ pollMode: 'active' });
+  if (!(await repairIfNeeded())) await resetIfNewDay('startup');
+  await scheduleDailyReset();
   await setupAlarm('active');
   poll('startup');
 });
 
-chrome.alarms.onAlarm.addListener((alarm) => {
+chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === ALARM_NAME) poll('alarm');
+  else if (alarm.name === DAILY_ALARM) {
+    await dailyReset('alarm'); // 內部會自己排下一次
+    poll('after-reset');
+  }
 });
+
+/**
+ * 每天台北時間 00:00 清除前一天的紀錄。
+ * 用一次性 alarm 並在觸發後重新排程，比固定 24 小時週期不容易因休眠而漂移。
+ */
+async function scheduleDailyReset() {
+  await chrome.alarms.clear(DAILY_ALARM);
+  chrome.alarms.create(DAILY_ALARM, { when: Date.now() + msUntilTaipeiMidnight() });
+}
+
+/**
+ * 清除當日紀錄：監看的診間（含我的號碼）、比對狀態、進度快取。
+ * 保留：通知與更新設定。
+ */
+async function dailyReset(reason) {
+  const { settings } = await getStore();
+  const today = todayInTaipei();
+  if (settings.dailyReset === false) {
+    // 使用者關掉自動清除時，只重置比對基準，保留監看清單
+    await chrome.storage.local.set({ states: {}, day: today });
+  } else {
+    await chrome.storage.local.set({
+      watches: [],
+      states: {},
+      snapshot: null,
+      pollMode: 'active',
+      day: today
+    });
+  }
+  await chrome.storage.local.set({
+    lastReset: { at: Date.now(), day: today, reason: reason || 'unknown' }
+  });
+  // 不論這次是由排程還是由輪詢的防呆路徑觸發，都要重新排下一次，
+  // 否則電腦在半夜休眠、改由輪詢補清除時，專屬排程就再也不會被排上了
+  await scheduleDailyReset();
+  await setupAlarm('active');
+  await updateBadge();
+  return today;
+}
+
+/**
+ * 資料的日期和今天不一樣就清除；回傳是否有清除。
+ *
+ * `day` 欄位是 1.0.5 才加的，從舊版升級上來的儲存資料沒有這個欄位。
+ * 所以不能把「沒有 day」直接當成全新安裝，否則升級後那些過期資料反而清不掉——
+ * 改成退回去看資料本身帶的日期（比對基準的 __date、或進度快取的日期）。
+ */
+async function resetIfNewDay(reason) {
+  const store = await getStore();
+  const today = todayInTaipei();
+  // 先看「資料自己帶的日期」，最後才看 day 欄位。
+  // 順序不能反過來：1.0.5 有個 bug 會在沒清資料的情況下把 day 蓋成今天，
+  // 先看 day 的話那些過期資料就永遠被判定成今天的而清不掉。
+  const dataDay = store.states?.__date || store.snapshot?.date || store.day || null;
+
+  if (dataDay === today) {
+    if (!store.day) await chrome.storage.local.set({ day: today });
+    return false;
+  }
+
+  // 完全沒有日期線索：沒有任何監看資料就是全新安裝，只記下日期
+  if (!dataDay && !store.watches.length) {
+    await chrome.storage.local.set({ day: today });
+    return false;
+  }
+
+  // 其餘情況（日期不是今天、或有監看資料但來源日期不明）一律視為過期
+  await dailyReset(reason);
+  return true;
+}
 
 async function setupAlarm(mode) {
   const store = await getStore();
@@ -72,16 +176,33 @@ function nothingLeftToWatch(watches, byKey) {
 // ---------------------------------------------------------------- 輪詢主流程
 
 let polling = null;
+let pollingSince = 0;
 
-function poll(reason) {
-  if (polling) return polling;
-  polling = doPoll(reason).finally(() => {
-    polling = null;
-  });
+async function poll(reason) {
+  // 日期檢查一定要在「同時只跑一次查詢」的去重之外先做完。
+  // 放在 doPoll 裡面的話，只要有一次查詢卡在網路上沒回來，
+  // 之後每一次 poll 都只會拿到那個卡住的 promise，跨日清除就永遠不會執行。
+  if (reason !== 'after-reset') {
+    try {
+      if (!(await repairIfNeeded())) await resetIfNewDay(reason);
+    } catch (e) {
+      /* 清除失敗不影響後續查詢 */
+    }
+  }
+
+  // 看門狗：查詢卡超過 30 秒就放行新的一輪，不讓它把之後全部凍住
+  if (polling && Date.now() - pollingSince < 30000) return polling;
+  pollingSince = Date.now();
+  polling = doPoll(reason)
+    .catch(() => {})
+    .finally(() => {
+      polling = null;
+    });
   return polling;
 }
 
 async function doPoll(reason) {
+  // 日期檢查已經在 poll() 裡做過了，這裡只負責抓取與比對
   const { settings, watches, states, pollMode } = await getStore();
   if (settings.paused && reason !== 'manual') return;
 
@@ -451,7 +572,14 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.settings || changes.watches) updateBadge();
 });
 
-// service worker 被喚醒時確保 alarm 還在
-chrome.alarms.get(ALARM_NAME).then((a) => {
-  if (!a) setupAlarm();
-});
+// service worker 每次被喚醒都會重跑這裡：不依賴 onInstalled／onStartup 有沒有觸發，
+// 一律確認一次修復與日期，並確保 alarm 還在
+(async () => {
+  try {
+    if (!(await repairIfNeeded())) await resetIfNewDay('sw-start');
+    if (!(await chrome.alarms.get(ALARM_NAME))) await setupAlarm();
+    if (!(await chrome.alarms.get(DAILY_ALARM))) await scheduleDailyReset();
+  } catch (e) {
+    /* 啟動檢查失敗不能讓整個 service worker 掛掉 */
+  }
+})();

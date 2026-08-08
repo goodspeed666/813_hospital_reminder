@@ -55,6 +55,14 @@
             >
           </label>
           <label class="toggle">
+            <input type="checkbox" id="daily-reset" />
+            <span
+              >每天凌晨 00:00 自動清除前一天的紀錄<em class="muted small"
+                >　清掉監看的診間與號碼，通知設定不受影響</em
+              ></span
+            >
+          </label>
+          <label class="toggle">
             <input type="checkbox" id="badge-enabled" />
             <span
               >在工具列圖示上顯示目前號碼<em class="muted small"
@@ -66,6 +74,7 @@
 
         <div class="row-actions">
           <button id="btn-test">發送測試通知</button>
+          <button id="btn-clear-watches">清除目前的監看清單</button>
           <span class="muted small">
             若沒看到通知，請到系統的「通知」設定確認 Chrome 已被允許顯示通知。
           </span>
