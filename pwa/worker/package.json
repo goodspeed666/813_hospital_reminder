@@ -1,0 +1,14 @@
+{
+  "name": "813-reminder-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "keys": "node ../scripts/gen-vapid.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^3"
+  }
+}

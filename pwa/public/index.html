@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b1f1d" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="看診進度" />
+    <meta name="description" content="非官方的 813 醫院看診進度提醒，快輪到你時通知你。" />
+    <title>看診進度提醒</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icons/icon-192.png" />
+    <link rel="icon" href="icons/icon-192.png" />
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="top-main">
+        <h1>看診進度<span class="tag" id="day-tag"></span></h1>
+        <p class="sub" id="status">載入中…</p>
+      </div>
+      <button id="btn-refresh" class="icon-btn" aria-label="立即重新查詢" title="立即重新查詢">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+          stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20.2 12a8.2 8.2 0 1 1-2.4-5.8" /><path d="M20.4 2.6v4.4H16" />
+        </svg>
+      </button>
+    </header>
+
+    <main>
+      <section id="watch-list" class="list"></section>
+
+      <button id="btn-add" class="add">＋ 加入要監看的診間</button>
+
+      <section class="panel" id="alert-panel" hidden>
+        <div class="row">
+          <label class="switch">
+            <input type="checkbox" id="opt-notify" />
+            <span>看診進度提醒<em>快輪到你時通知</em></span>
+          </label>
+        </div>
+        <div class="row">
+          <label class="switch">
+            <input type="checkbox" id="opt-push" />
+            <span>手機關著也要收到<em>需要背景推播，見下方說明</em></span>
+          </label>
+        </div>
+        <div class="row">
+          <label class="switch">
+            <input type="checkbox" id="opt-wakelock" />
+            <span>候診時保持螢幕不休眠<em>App 開著時才有作用</em></span>
+          </label>
+        </div>
+        <div class="row">
+          <label class="switch">
+            <input type="checkbox" id="opt-sound" />
+            <span>提示音與震動</span>
+          </label>
+        </div>
+        <div class="row actions">
+          <button id="btn-test">發送測試通知</button>
+          <button id="btn-clear" class="ghost">清除今日紀錄</button>
+        </div>
+      </section>
+
+      <p class="note" id="hint"></p>
+    </main>
+
+    <!-- 選診間 -->
+    <div class="sheet" id="sheet" hidden>
+      <div class="sheet-bg" id="sheet-bg"></div>
+      <div class="sheet-body">
+        <div class="sheet-head">
+          <strong>選擇診間</strong>
+          <button id="sheet-close" class="ghost small">關閉</button>
+        </div>
+        <div class="filters">
+          <div class="tabs" id="shift-tabs"></div>
+          <input type="search" id="search" placeholder="搜尋科別、診間或醫師" />
+        </div>
+        <p class="note" id="sheet-note"></p>
+        <div id="clinic-list" class="clinics"></div>
+      </div>
+    </div>
+
+    <!-- 設定我的號碼 -->
+    <div class="sheet" id="num-sheet" hidden>
+      <div class="sheet-bg" id="num-bg"></div>
+      <div class="sheet-body short">
+        <div class="sheet-head"><strong id="num-title">設定</strong>
+          <button id="num-close" class="ghost small">關閉</button>
+        </div>
+        <label class="field">
+          <span>我的號碼</span>
+          <input type="number" inputmode="numeric" id="num-input" placeholder="選填，例如 60" />
+          <em>填了才能做「快輪到我」提醒</em>
+        </label>
+        <label class="field">
+          <span>剩幾號時提醒</span>
+          <input type="number" inputmode="numeric" id="num-threshold" value="3" min="1" max="50" />
+        </label>
+        <label class="switch inline">
+          <input type="checkbox" id="num-onchange" />
+          <span>每次叫號變動都通知</span>
+        </label>
+        <div class="sheet-actions">
+          <button id="num-remove" class="ghost danger">移除這個診間</button>
+          <button id="num-save" class="primary">完成</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" hidden></div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

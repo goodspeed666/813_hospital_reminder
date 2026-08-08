@@ -1,6 +1,23 @@
 # 813國軍桃園總醫院新竹分院 看診進度提醒
 
-Chrome 擴充功能。自動查詢 [813 醫院的看診進度頁面](http://www.813.com.tw/WebService/link/show_call2.html)，
+**非官方工具**，由個人開發，非國軍桃園總醫院新竹分院推出，未經該院授權或背書。
+
+這個 repo 有兩個版本，用同一支資料來源、同一套提醒邏輯：
+
+| | 位置 | 適用 |
+|---|---|---|
+| **Chrome 擴充功能** | repo 根目錄（本文件） | 電腦。裝好就能用，不需要伺服器 |
+| **手機版 PWA** | [`pwa/`](pwa/) | iPhone／Android。加到主畫面像 App，需自行部署一個 Cloudflare Worker |
+
+手機版為什麼需要 Worker：醫院網站只有 http，而 PWA 強制 https，中間一定要有代理；
+且手機瀏覽器不能在背景輪詢，要在螢幕鎖住時收到提醒只能靠伺服器推播。
+詳見 [`pwa/README.md`](pwa/README.md)。
+
+---
+
+## Chrome 擴充功能
+
+自動查詢 [813 醫院的看診進度頁面](http://www.813.com.tw/WebService/link/show_call2.html)，
 指定的診間一有異動、或快輪到你的號碼時，直接跳 Chrome 通知——不用一直開著網頁按重新整理。
 
 <p align="center">

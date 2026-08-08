@@ -1,0 +1,25 @@
+name = "813-reminder"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# KV：存推播訂閱、監看設定與當日進度快取
+# 建立方式： npx wrangler kv namespace create STATE
+# 然後把下面的 id 換成指令輸出的值
+[[kv_namespaces]]
+binding = "STATE"
+id = "PUT_YOUR_KV_NAMESPACE_ID_HERE"
+
+[triggers]
+# 第一條：每分鐘查詢看診進度並推播
+# 第二條：UTC 16:00 = 台北 00:00，清除前一天的紀錄
+#         （台灣不實施日光節約時間，全年固定 UTC+8）
+crons = ["* * * * *", "0 16 * * *"]
+
+[vars]
+VAPID_SUBJECT = "mailto:you@example.com"
+# 允許呼叫 API 的前端網址，多個用逗號分隔；設 * 代表不限制
+ALLOWED_ORIGINS = "*"
+
+# VAPID_PUBLIC_KEY 與 VAPID_PRIVATE_KEY 請用 secret 設定，不要寫在這個檔案：
+#   npx wrangler secret put VAPID_PUBLIC_KEY
+#   npx wrangler secret put VAPID_PRIVATE_KEY
