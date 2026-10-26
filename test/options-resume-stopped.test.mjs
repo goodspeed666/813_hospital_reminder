@@ -12,52 +12,46 @@ function check(name, condition, detail) {
 }
 
 class Element {
-  constructor() {
+  constructor(tagName = 'div') {
+    this.tagName = tagName.toLowerCase();
     this.children = [];
     this.listeners = {};
-    this.controls = new Map();
     this.value = '';
     this.checked = false;
     this.disabled = false;
     this.hidden = false;
     this.className = '';
-    this.textContent = '';
-    this._innerHTML = '';
+    this.style = {};
+    this._textContent = '';
   }
-  set innerHTML(value) {
-    this._innerHTML = value;
-    if (value === '') {
-      this.children = [];
-      this.controls.clear();
-    }
+  set textContent(value) {
+    this._textContent = String(value ?? '');
+    this.children = [];
   }
-  get innerHTML() { return this._innerHTML; }
+  get textContent() {
+    return this._textContent + this.children.map((child) => child.textContent || '').join('');
+  }
   addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
   appendChild(child) { this.children.push(child); return child; }
+  replaceChildren(...children) { this._textContent = ''; this.children = children; }
   querySelector(selector) {
-    if (this.controls.has(selector)) return this.controls.get(selector);
     for (const child of this.children) {
+      const matches = selector.startsWith('.')
+        ? child.className?.split(/\s+/).includes(selector.slice(1))
+        : child.tagName === selector.toLowerCase();
+      if (matches) return child;
       if (child?.querySelector) {
         const found = child.querySelector(selector);
         if (found) return found;
       }
     }
-    const className = selector.startsWith('.') ? selector.slice(1) : null;
-    const matches = className
-      ? new RegExp(`class="[^"]*\\b${className}\\b`).test(this._innerHTML)
-      : selector === 'input' && /<input\b/.test(this._innerHTML);
-    if (!matches) return null;
-    const control = new Element();
-    const tag = className
-      ? this._innerHTML.match(new RegExp(`<input\\b[^>]*class="[^"]*\\b${className}\\b[^>]*>`))?.[0]
-      : this._innerHTML.match(/<input\b[^>]*>/)?.[0];
-    control.checked = !!tag && /\bchecked\b/.test(tag);
-    const value = tag?.match(/\bvalue="([^"]*)"/);
-    if (value) control.value = value[1];
-    this.controls.set(selector, control);
-    return control;
+    return null;
   }
   setAttribute() {}
+}
+
+class TextNode {
+  constructor(text) { this.textContent = String(text); this.children = []; }
 }
 
 const elements = new Map();
@@ -66,7 +60,8 @@ const document = {
     if (!elements.has(selector)) elements.set(selector, new Element());
     return elements.get(selector);
   },
-  createElement() { return new Element(); }
+  createElement(tagName) { return new Element(tagName); },
+  createTextNode(text) { return new TextNode(text); }
 };
 
 const today = common.todayInTaipei();
@@ -120,7 +115,7 @@ const clinic = document.querySelector('#clinic-list').children.flatMap((group) =
 const checkbox = clinic.querySelector('input');
 check('已停止監看的診間以未勾選狀態顯示', checkbox.checked === false, String(checkbox.checked));
 const details = clinic.children.find((child) => child.className === 'detail');
-check('已停止狀態與原號碼設定仍可查看', !!details && details.innerHTML.includes('已過號，已停止監看') && !!clinic.querySelector('.my-number'));
+check('已停止狀態與原號碼設定仍可查看', !!details && details.textContent.includes('已過號，已停止監看') && !!clinic.querySelector('.my-number'));
 
 checkbox.checked = true;
 for (const listener of checkbox.listeners.change || []) listener({ target: checkbox });
@@ -143,7 +138,7 @@ const orphanTree = descendants(document.querySelector('#orphan-list'));
 const orphan = orphanTree.find((node) => node.className === 'orphan');
 const orphanDetail = orphanTree.find((node) => node.className === 'detail');
 const resume = orphanTree.find((node) => node.className === 'orphan-resume');
-check('班表外項目顯示已停止狀態與原號碼', orphan?.innerHTML.includes('已停止監看') && orphan.innerHTML.includes('我的號碼 55'), orphan?.innerHTML);
+check('班表外項目顯示已停止狀態與原號碼', orphan?.textContent.includes('已停止監看') && orphan.textContent.includes('我的號碼 55'), orphan?.textContent);
 check('班表外已停止項目仍提供號碼細項與重新啟用按鈕', !!orphanDetail && !!orphanDetail.querySelector('.my-number') && !!resume);
 for (const listener of resume?.listeners.click || []) listener();
 check('點選重新啟用保留班表外診間與提醒設定', context.__optionsTest.getWatchMap().get(key)?.enabled === true && context.__optionsTest.getWatchMap().get(key)?.notifyNear === false, JSON.stringify(context.__optionsTest.getWatchMap().get(key)));

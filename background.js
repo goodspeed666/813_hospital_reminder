@@ -13,6 +13,12 @@ import {
   rowKey,
   watchKey
 } from './common.js';
+import { play as playTone } from './sound.js';
+
+// Firefox has a DOM-backed event page and no chrome.offscreen API. Its
+// browser.runtime.getBrowserInfo API is Firefox-specific, unlike the shared
+// chrome.* compatibility namespace.
+const IS_FIREFOX = typeof globalThis.browser?.runtime?.getBrowserInfo === 'function';
 
 // ---------------------------------------------------------------- 生命週期
 
@@ -431,18 +437,21 @@ async function notify(ev, settings) {
   // 同一個診間使用固定的通知 ID，新通知會取代舊的，避免堆疊一整排
   const id = 'watch::' + ev.key;
   await chrome.notifications.clear(id);
+  const options = {
+    type: 'basic',
+    iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+    title: ev.title,
+    message: ev.message
+  };
+  if (!IS_FIREFOX) {
+    options.priority = ev.urgent ? 2 : 1;
+    options.requireInteraction = !!settings.requireInteraction;
+    options.silent = true; // 系統音效關閉，改用擴充功能自己的提示音
+  }
   await new Promise((resolve) => {
     chrome.notifications.create(
       id,
-      {
-        type: 'basic',
-        iconUrl: chrome.runtime.getURL('icons/icon128.png'),
-        title: ev.title,
-        message: ev.message,
-        priority: ev.urgent ? 2 : 1,
-        requireInteraction: !!settings.requireInteraction,
-        silent: true // 系統音效關閉，改用擴充功能自己的提示音
-      },
+      options,
       () => {
         void chrome.runtime.lastError;
         resolve();
@@ -458,6 +467,7 @@ chrome.notifications.onClicked.addListener((id) => {
 
 // ---------------------------------------------------------------- 音效（offscreen）
 
+// FIREFOX_BUILD: CHROME_OFFSCREEN_BRIDGE_BEGIN
 let creatingOffscreen = null;
 
 async function ensureOffscreen() {
@@ -481,11 +491,18 @@ async function ensureOffscreen() {
   creatingOffscreen = null;
   return true;
 }
+// FIREFOX_BUILD: CHROME_OFFSCREEN_BRIDGE_END
 
 async function playSound(urgent) {
   try {
+    if (IS_FIREFOX) {
+      playTone(!!urgent);
+      return;
+    }
+    // FIREFOX_BUILD: CHROME_OFFSCREEN_CALL_BEGIN
     await ensureOffscreen();
     await chrome.runtime.sendMessage({ type: 'play-sound', urgent: !!urgent });
+    // FIREFOX_BUILD: CHROME_OFFSCREEN_CALL_END
   } catch (e) {
     /* 音效失敗不影響通知本身 */
   }

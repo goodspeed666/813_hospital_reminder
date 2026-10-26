@@ -120,12 +120,20 @@ async function reload() {
   try {
     rows = await fetchProgress();
     const date = rows.length ? formatDate(rows[0].SCD_VISITDT) : '';
-    note.innerHTML = `今日（${date}）共 <b>${rows.length}</b> 個診間。勾選要監看的診間後，記得按右下角「儲存設定」。`;
+    note.replaceChildren();
+    appendText(note, `今日（${date}）共 `);
+    const count = document.createElement('b');
+    count.textContent = String(rows.length);
+    note.appendChild(count);
+    appendText(note, ' 個診間。勾選要監看的診間後，記得按右下角「儲存設定」。');
     render();
   } catch (e) {
-    note.innerHTML = `<span style="color:var(--danger)">抓取失敗：${escapeHtml(
-      String(e.message || e)
-    )}</span>　請確認網路連線後再按「重新抓取診間清單」。`;
+    note.replaceChildren();
+    const error = document.createElement('span');
+    error.style.color = 'var(--danger)';
+    error.textContent = '抓取失敗：' + String(e.message || e);
+    note.appendChild(error);
+    appendText(note, '　請確認網路連線後再按「重新抓取診間清單」。');
   } finally {
     $('#btn-reload').disabled = false;
   }
@@ -149,7 +157,7 @@ function renderShiftTabs() {
   const shifts = ['全部', ...groupRows(rows).map((g) => g.shift)];
   const box = $('#shift-tabs');
   if (!shifts.includes(shiftFilter)) shiftFilter = '全部';
-  box.innerHTML = '';
+  box.replaceChildren();
   for (const s of shifts) {
     const b = document.createElement('button');
     b.className = 'tab' + (s === shiftFilter ? ' active' : '');
@@ -173,11 +181,14 @@ function matches(row) {
 
 function renderList() {
   const box = $('#clinic-list');
-  box.innerHTML = '';
+  box.replaceChildren();
   const groups = groupRows(rows.filter(matches));
 
   if (!groups.length) {
-    box.innerHTML = '<p class="muted small">沒有符合的診間。</p>';
+    const empty = document.createElement('p');
+    empty.className = 'muted small';
+    empty.textContent = '沒有符合的診間。';
+    box.appendChild(empty);
     return;
   }
 
@@ -185,9 +196,15 @@ function renderList() {
     const gEl = document.createElement('div');
     gEl.className = 'shift-group';
     const count = g.sections.reduce((n, s) => n + s.items.length, 0);
-    gEl.innerHTML = `<div class="shift-title">${escapeHtml(
-      g.shift
-    )}<span class="muted small" style="font-weight:400">${count} 診</span></div>`;
+    const title = document.createElement('div');
+    title.className = 'shift-title';
+    appendText(title, g.shift);
+    const countEl = document.createElement('span');
+    countEl.className = 'muted small';
+    countEl.style.fontWeight = '400';
+    countEl.textContent = `${count} 診`;
+    title.appendChild(countEl);
+    gEl.appendChild(title);
 
     for (const sec of g.sections) {
       const t = document.createElement('div');
@@ -210,14 +227,25 @@ function clinicRow(row) {
 
   const main = document.createElement('label');
   main.className = 'clinic-main';
-  main.innerHTML = `
-    <input type="checkbox" ${on ? 'checked' : ''} />
-    <span class="clinic-name">${escapeHtml(row.ROM_RONAME)}</span>
-    <span class="clinic-doc">${escapeHtml(row.EMP_EMPNAME || '')}</span>
-    <span class="clinic-prog">${progressPill(row)}</span>`;
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.checked = on;
+  main.appendChild(checkbox);
+  const name = document.createElement('span');
+  name.className = 'clinic-name';
+  name.textContent = row.ROM_RONAME || '';
+  main.appendChild(name);
+  const doctor = document.createElement('span');
+  doctor.className = 'clinic-doc';
+  doctor.textContent = row.EMP_EMPNAME || '';
+  main.appendChild(doctor);
+  const progress = document.createElement('span');
+  progress.className = 'clinic-prog';
+  progress.appendChild(progressPill(row));
+  main.appendChild(progress);
   el.appendChild(main);
 
-  main.querySelector('input').addEventListener('change', (e) => {
+  checkbox.addEventListener('change', (e) => {
     if (e.target.checked) {
       const existing = watchMap.get(key);
       watchMap.set(key, {
@@ -244,55 +272,95 @@ function clinicRow(row) {
 function progressPill(row) {
   const phase = phaseOf(row.CLC_MAXIMUM);
   const cls = phase === 'open' ? '' : phase === 'finished' ? ' grey' : ' grey';
-  return `<span class="pill${cls}">${escapeHtml(progressText(row.CLC_MAXIMUM))}</span>`;
+  const pill = document.createElement('span');
+  pill.className = `pill${cls}`;
+  pill.textContent = progressText(row.CLC_MAXIMUM);
+  return pill;
 }
 
 function detailPanel(key, watch) {
   const d = document.createElement('div');
   d.className = 'detail';
-  d.innerHTML = `
-    ${watch.enabled === false ? '<div class="muted small">已過號，已停止監看。更改號碼並儲存即可重新啟用。</div>' : ''}
-    <label title="填了號碼才能做「快輪到我」提醒；留空則只在進度異動時通知">
-      我的號碼
-      <input type="number" min="0" step="1" class="my-number" value="${
-        watch.myNumber ?? ''
-      }" placeholder="選填" />
-    </label>
-    <label>
-      <input type="checkbox" class="notify-near" ${watch.notifyNear ? 'checked' : ''} />
-      快輪到我時通知（剩
-      <input type="number" min="1" max="50" step="1" class="near-threshold" style="width:58px"
-        value="${watch.nearThreshold ?? 3}" /> 號）
-    </label>
-    <div class="sep"></div>
-    <label>
-      <input type="checkbox" class="notify-change" ${watch.notifyOnChange ? 'checked' : ''} />
-      進度號碼一有異動就通知
-    </label>
-    <label>
-      <input type="checkbox" class="notify-status" ${watch.notifyStatus ? 'checked' : ''} />
-      開始看診 / 看診結束時通知
-    </label>`;
+  if (watch.enabled === false) {
+    const stopped = document.createElement('div');
+    stopped.className = 'muted small';
+    stopped.textContent = '已過號，已停止監看。更改號碼並儲存即可重新啟用。';
+    d.appendChild(stopped);
+  }
+
+  const numberLabel = document.createElement('label');
+  numberLabel.title = '填了號碼才能做「快輪到我」提醒；留空則只在進度異動時通知';
+  appendText(numberLabel, '我的號碼');
+  const numberInput = document.createElement('input');
+  numberInput.type = 'number';
+  numberInput.min = '0';
+  numberInput.step = '1';
+  numberInput.className = 'my-number';
+  numberInput.value = watch.myNumber ?? '';
+  numberInput.placeholder = '選填';
+  numberLabel.appendChild(numberInput);
+  d.appendChild(numberLabel);
+
+  const nearLabel = document.createElement('label');
+  const nearCheckbox = document.createElement('input');
+  nearCheckbox.type = 'checkbox';
+  nearCheckbox.className = 'notify-near';
+  nearCheckbox.checked = !!watch.notifyNear;
+  nearLabel.appendChild(nearCheckbox);
+  appendText(nearLabel, '快輪到我時通知（剩');
+  const thresholdInput = document.createElement('input');
+  thresholdInput.type = 'number';
+  thresholdInput.min = '1';
+  thresholdInput.max = '50';
+  thresholdInput.step = '1';
+  thresholdInput.className = 'near-threshold';
+  thresholdInput.style.width = '58px';
+  thresholdInput.value = watch.nearThreshold ?? 3;
+  nearLabel.appendChild(thresholdInput);
+  appendText(nearLabel, ' 號）');
+  d.appendChild(nearLabel);
+
+  const separator = document.createElement('div');
+  separator.className = 'sep';
+  d.appendChild(separator);
+
+  const changeLabel = document.createElement('label');
+  const changeCheckbox = document.createElement('input');
+  changeCheckbox.type = 'checkbox';
+  changeCheckbox.className = 'notify-change';
+  changeCheckbox.checked = !!watch.notifyOnChange;
+  changeLabel.appendChild(changeCheckbox);
+  appendText(changeLabel, '進度號碼一有異動就通知');
+  d.appendChild(changeLabel);
+
+  const statusLabel = document.createElement('label');
+  const statusCheckbox = document.createElement('input');
+  statusCheckbox.type = 'checkbox';
+  statusCheckbox.className = 'notify-status';
+  statusCheckbox.checked = !!watch.notifyStatus;
+  statusLabel.appendChild(statusCheckbox);
+  appendText(statusLabel, '開始看診 / 看診結束時通知');
+  d.appendChild(statusLabel);
 
   const upd = (patch) => {
     watchMap.set(key, { ...watchMap.get(key), ...patch });
     markDirty();
   };
 
-  d.querySelector('.my-number').addEventListener('input', (e) => {
+  numberInput.addEventListener('input', (e) => {
     const v = e.target.value.trim();
     upd({ myNumber: v === '' ? null : Math.max(0, parseInt(v, 10) || 0), enabled: true });
   });
-  d.querySelector('.near-threshold').addEventListener('input', (e) => {
+  thresholdInput.addEventListener('input', (e) => {
     upd({ nearThreshold: Math.max(1, parseInt(e.target.value, 10) || 3) });
   });
-  d.querySelector('.notify-near').addEventListener('change', (e) =>
+  nearCheckbox.addEventListener('change', (e) =>
     upd({ notifyNear: e.target.checked })
   );
-  d.querySelector('.notify-change').addEventListener('change', (e) =>
+  changeCheckbox.addEventListener('change', (e) =>
     upd({ notifyOnChange: e.target.checked })
   );
-  d.querySelector('.notify-status').addEventListener('change', (e) =>
+  statusCheckbox.addEventListener('change', (e) =>
     upd({ notifyStatus: e.target.checked })
   );
 
@@ -305,18 +373,27 @@ function renderOrphans() {
   const card = $('#orphan-card');
   const box = $('#orphan-list');
   card.hidden = orphans.length === 0;
-  box.innerHTML = '';
+  box.replaceChildren();
 
   for (const [key, w] of orphans) {
     const item = document.createElement('div');
     item.className = 'orphan-wrap';
     const el = document.createElement('div');
     el.className = 'orphan';
-    el.innerHTML = `
-      <span class="grow">${escapeHtml(w.section)}／${escapeHtml(w.room)}
-        <span class="muted small">（${escapeHtml(w.shift)}${
-          w.myNumber != null ? '・我的號碼 ' + w.myNumber : ''
-        }）</span>${w.enabled === false ? '<span class="muted small">已停止監看</span>' : ''}</span>`;
+    const grow = document.createElement('span');
+    grow.className = 'grow';
+    appendText(grow, `${w.section || ''}／${w.room || ''}`);
+    const meta = document.createElement('span');
+    meta.className = 'muted small';
+    meta.textContent = `（${w.shift || ''}${w.myNumber != null ? '・我的號碼 ' + w.myNumber : ''}）`;
+    grow.appendChild(meta);
+    if (w.enabled === false) {
+      const stopped = document.createElement('span');
+      stopped.className = 'muted small';
+      stopped.textContent = '已停止監看';
+      grow.appendChild(stopped);
+    }
+    el.appendChild(grow);
     if (w.enabled === false) {
       const resume = document.createElement('button');
       resume.className = 'orphan-resume';
@@ -347,7 +424,7 @@ function renderOrphans() {
 
 function renderBadgeSelect() {
   const sel = $('#badge-key');
-  sel.innerHTML = '';
+  sel.replaceChildren();
   const auto = document.createElement('option');
   auto.value = '';
   auto.textContent = '自動（第一個監看的診間）';
@@ -384,12 +461,6 @@ async function save() {
   setStatus(`已儲存　監看 ${n} 個診間`, 'ok');
 }
 
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;'
-  })[c]);
+function appendText(element, value) {
+  element.appendChild(document.createTextNode(String(value ?? '')));
 }

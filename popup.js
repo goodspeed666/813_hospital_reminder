@@ -11,19 +11,21 @@ import {
 
 const $ = (s) => document.querySelector(s);
 
-const SVG = (inner) =>
-  `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
-     stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
-const ICON_PAUSE = SVG('<path d="M9 4v16M15 4v16"/>');
-const ICON_PLAY = SVG('<path d="M6.5 4.3v15.4L19.5 12z" fill="currentColor" stroke-width="1.6"/>');
-const ICON_REFRESH = SVG('<path d="M20.2 12a8.2 8.2 0 1 1-2.4-5.8"/><path d="M20.4 2.6v4.4H16"/>');
+const ICON_PATHS = {
+  pause: [{ d: 'M9 4v16M15 4v16' }],
+  play: [{ d: 'M6.5 4.3v15.4L19.5 12z', fill: 'currentColor', 'stroke-width': '1.6' }],
+  refresh: [
+    { d: 'M20.2 12a8.2 8.2 0 1 1-2.4-5.8' },
+    { d: 'M20.4 2.6v4.4H16' }
+  ]
+};
 
 let store = null;
 
 init();
 
 async function init() {
-  $('#btn-refresh').innerHTML = ICON_REFRESH;
+  $('#btn-refresh').replaceChildren(createIcon('refresh'));
   $('#btn-refresh').addEventListener('click', refresh);
   $('#btn-pause').addEventListener('click', togglePause);
   $('#link-options').addEventListener('click', (e) => {
@@ -69,7 +71,7 @@ function render() {
   const idle = pollMode === 'idle' && enabled.length > 0;
 
   const pauseBtn = $('#btn-pause');
-  pauseBtn.innerHTML = settings.paused ? ICON_PLAY : ICON_PAUSE;
+  pauseBtn.replaceChildren(createIcon(settings.paused ? 'play' : 'pause'));
   pauseBtn.title = settings.paused ? '繼續自動查詢' : '暫停自動查詢';
   pauseBtn.setAttribute('aria-label', pauseBtn.title);
   document.body.classList.toggle('paused', !!settings.paused);
@@ -87,7 +89,7 @@ function render() {
   }
 
   const list = $('#list');
-  list.innerHTML = '';
+  list.replaceChildren();
 
   if (snapshot?.error) {
     const e = document.createElement('div');
@@ -108,9 +110,15 @@ function render() {
       });
     const d = document.createElement('div');
     d.className = 'empty';
-    d.innerHTML = stoppedPassed
-      ? '已過號，已停止監看。<br />到設定頁更改號碼並儲存，即可重新開始監看。'
-      : '尚未設定啟用中的監看診間。<br />到設定頁勾選科別與診間就會開始提醒。';
+    d.appendChild(document.createTextNode(
+      stoppedPassed ? '已過號，已停止監看。' : '尚未設定啟用中的監看診間。'
+    ));
+    d.appendChild(document.createElement('br'));
+    d.appendChild(document.createTextNode(
+      stoppedPassed
+        ? '到設定頁更改號碼並儲存，即可重新開始監看。'
+        : '到設定頁勾選科別與診間就會開始提醒。'
+    ));
     const b = document.createElement('button');
     b.className = 'primary';
     b.textContent = '前往設定';
@@ -149,10 +157,14 @@ function itemEl(w, row) {
 
   const top = document.createElement('div');
   top.className = 'item-top';
-  top.innerHTML = `<span class="item-room"></span><span class="item-meta"></span>`;
-  top.querySelector('.item-room').textContent = w.room;
-  top.querySelector('.item-meta').textContent =
+  const roomName = document.createElement('span');
+  roomName.className = 'item-room';
+  roomName.textContent = w.room;
+  const meta = document.createElement('span');
+  meta.className = 'item-meta';
+  meta.textContent =
     `${w.shift}・${w.section}` + (w.doctor ? `・${w.doctor}` : '');
+  top.append(roomName, meta);
   el.appendChild(top);
 
   const body = document.createElement('div');
@@ -160,7 +172,10 @@ function itemEl(w, row) {
 
   const left = document.createElement('div');
   if (!row) {
-    left.innerHTML = '<span class="big text">今日無此診</span>';
+    const missing = document.createElement('span');
+    missing.className = 'big text';
+    missing.textContent = '今日無此診';
+    left.appendChild(missing);
   } else if (phase === 'open') {
     const lbl = document.createElement('span');
     lbl.className = 'big-label';
@@ -180,13 +195,33 @@ function itemEl(w, row) {
   const right = document.createElement('div');
   right.className = 'item-right';
   const near = el.classList.contains('near') || el.classList.contains('turn');
-  const hi = near ? ' class="hi"' : '';
   if (w.myNumber != null) {
-    const mine = `你的號碼 <b>${w.myNumber}</b>`;
-    if (remaining == null) right.innerHTML = mine;
-    else if (remaining > 0) right.innerHTML = `${mine}<br />還有 <b${hi}>${remaining}</b> 位`;
-    else if (remaining === 0) right.innerHTML = `${mine}<br /><b class="hi">輪到你了</b>`;
-    else right.innerHTML = `${mine}<br />已過號 <b class="hi">${-remaining}</b>`;
+    right.appendChild(document.createTextNode('你的號碼 '));
+    const number = document.createElement('b');
+    number.textContent = String(w.myNumber);
+    right.appendChild(number);
+    if (remaining != null) {
+      right.appendChild(document.createElement('br'));
+      if (remaining > 0) {
+        right.appendChild(document.createTextNode('還有 '));
+        const count = document.createElement('b');
+        if (near) count.className = 'hi';
+        count.textContent = String(remaining);
+        right.appendChild(count);
+        right.appendChild(document.createTextNode(' 位'));
+      } else if (remaining === 0) {
+        const message = document.createElement('b');
+        message.className = 'hi';
+        message.textContent = '輪到你了';
+        right.appendChild(message);
+      } else {
+        right.appendChild(document.createTextNode('已過號 '));
+        const count = document.createElement('b');
+        count.className = 'hi';
+        count.textContent = String(-remaining);
+        right.appendChild(count);
+      }
+    }
   } else if (row && phase === 'open') {
     right.textContent = '看診中';
   }
@@ -194,4 +229,22 @@ function itemEl(w, row) {
 
   el.appendChild(body);
   return el;
+}
+
+function createIcon(name) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '15');
+  svg.setAttribute('height', '15');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2.1');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  for (const attributes of ICON_PATHS[name]) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    for (const [key, value] of Object.entries(attributes)) path.setAttribute(key, value);
+    svg.appendChild(path);
+  }
+  return svg;
 }

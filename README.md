@@ -2,11 +2,12 @@
 
 **非官方工具**，由個人開發，非國軍桃園總醫院新竹分院推出，未經該院授權或背書。
 
-這個 repo 有兩個版本，用同一支資料來源、同一套提醒邏輯：
+這個 repo 有三種用戶端，共用同一支資料來源和提醒邏輯：
 
 | | 位置 | 適用 |
 |---|---|---|
 | **Chrome 擴充功能** | repo 根目錄（本文件） | 電腦。裝好就能用，不需要伺服器 |
+| **Firefox 擴充功能** | `scripts/build-firefox.mjs` 產生 AMO 套件 | Firefox 桌面版 142.0 以上；發行資訊見 [指南](docs/firefox-amo-release.md) |
 | **手機版 PWA** | [`pwa/`](pwa/) | iPhone／Android。加到主畫面像 App，需自行部署一個 Cloudflare Worker |
 
 手機版為什麼需要 Worker：醫院網站只有 http，而 PWA 強制 https，中間一定要有代理；
@@ -153,12 +154,12 @@
 
 **完全沒跳通知**
 先到設定頁按「發送測試通知」。如果連測試通知都沒出現，是系統擋掉了：
-到「系統設定 → 通知 → Google Chrome」確認通知已開啟。
+到作業系統的通知設定確認 Chrome 或 Firefox 的通知已開啟。
 測試通知會出現、但實際進度變了卻沒通知，多半是該診間今天沒開診（面板會顯示「今日無此診」或「尚未開診」）。
 
 **通知幾秒就自己消失（macOS）**
-macOS 預設的通知樣式是「橫幅」，不管擴充功能怎麼設定都會自動滑掉。
-到「系統設定 → 通知 → Google Chrome」把樣式改成「**提醒**（Alerts）」就會留在畫面上。
+macOS 預設的通知樣式是「橫幅」，不管擴充功能怎麼設定都可能自動滑掉。
+到「系統設定 → 通知」選擇正在使用的瀏覽器，再調整通知樣式。
 
 **工具列圖示沒有數字**
 確認圖示有被「釘選」出來，且設定頁的「在工具列圖示上顯示目前號碼」有勾。
@@ -183,16 +184,16 @@ macOS 預設的通知樣式是「橫幅」，不管擴充功能怎麼設定都�
 
 ## 幾件值得知道的事
 
-**Chrome 要在執行中。** 這是靠 Chrome 的背景服務在查詢，Chrome 完全關掉就不會查了
+**瀏覽器要在執行中。** 這是靠 Chrome 或 Firefox 的背景程序在查詢，瀏覽器完全關掉就不會查了
 （視窗最小化、只留分頁沒關係）。筆電闔上睡眠時也會暫停，醒來後會自動恢復。
 
 **剛勾選的診間不會馬上跳通知。** 第一次抓到該診間的進度只會當成比對基準，
 要等到下一次進度真的變動才會通知，避免一設定完就被洗版。換日時也會自動重新抓基準。
 
-**醫院網站只有 http 沒有 https**，所以 `manifest.json` 的權限是 `http://www.813.com.tw/*`。
-擴充功能的背景程序可以正常對 http 發出請求，不受一般網頁的混合內容限制。
+**查詢使用醫院公開的 HTTP API。** Chrome 原始 manifest 與 Firefox 套件都只允許連線到
+`www.813.com.tw`，權限列出 HTTP 和 HTTPS 網址模式；程式目前實際查詢 HTTP 網址。
 
-**所有資料都留在你自己的瀏覽器裡。** 設定存在 `chrome.storage.local`，
+**所有資料都留在你自己的瀏覽器裡。** 設定存在瀏覽器擴充功能的本機儲存區（Chrome 為 `chrome.storage.local`），
 除了查詢醫院自己的 API 之外不會對外連線，也沒有任何追蹤或統計。
 完整說明見 [隱私權政策](PRIVACY.md)。
 
@@ -227,24 +228,29 @@ http://www.813.com.tw/WebService/WebService.asmx/HISAPI?_Str=<base64>
 ### 檔案結構
 
 ```
-manifest.json     Manifest V3 設定
+manifest.json     Chrome Manifest V3 原始設定；Firefox 版由建置腳本產生
 common.js         API 位址、共用型別判斷與工具函式
 background.js     背景服務：定時輪詢、比對差異、發通知、更新徽章
+sound.js          提示音合成；Chrome offscreen document 與 Firefox 背景頁共用
 options.html/js   設定頁
 popup.html/js     工具列即時面板
-offscreen.js      提示音（service worker 沒有 Audio API，需透過 offscreen document）
+offscreen.html/js Chrome 專用提示音頁面（Firefox 不封裝此檔案）
 shared.css        共用樣式（淺色／深色）
 docs/             說明文件用的截圖（示範資料，非真實看診紀錄）
 test/             測試（見 test/README.md）
 PRIVACY.md        隱私權政策
 ```
 
+Firefox 桌面版 142.0 以上的 AMO 套件由 `node scripts/build-firefox.mjs` 產生。
+封裝、重建與 AMO 欄位文字見 [Firefox AMO 發行指南](docs/firefox-amo-release.md)
+及 `AMO_BUILD_README.md`。
+
 ### 實作重點
 
 - 輪詢用 `chrome.alarms`，不是 `setInterval`——MV3 的 service worker 會被休眠，計時器不可靠
 - 網路請求有 20 秒逾時保護（`AbortController`），避免連線卡住讓輪詢整個停擺
 - 抓取失敗時保留上一次的資料，不會把畫面清空，也不會誤發通知
-- 提示音透過 offscreen document 的 Web Audio 產生，不需要額外的音檔
+- 提示音用 Web Audio 產生；Chrome 透過 offscreen document 播放，Firefox 在背景頁播放，不需要額外音檔
 - 每個監看項目各自記錄上次的進度與已提醒過的號碼，避免重複通知
 - 輪詢模式（`active` / `idle`）每次抓取後都會比對實際的 alarm 週期並自我修正，狀態不會長期漂移
 - 凌晨清除用一次性 alarm 並在觸發後立刻重排，比固定 24 小時週期更不容易因休眠而漂移；

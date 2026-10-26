@@ -1,7 +1,7 @@
 # 隱私權政策
 
 **擴充功能名稱**：813國軍桃園總醫院新竹分院 看診進度提醒（非官方）
-**最後更新**：2026 年 8 月 4 日
+**最後更新**：2026 年 10 月 26 日
 
 ## 簡短版
 
@@ -23,7 +23,7 @@
 
 ## 本擴充功能儲存了什麼
 
-以下資料儲存在瀏覽器本機的 `chrome.storage.local`，**不會離開你的裝置**，
+以下資料儲存在擴充功能的本機儲存區（Chrome 使用 `chrome.storage.local`），**不會離開你的裝置**，
 移除擴充功能時會一併刪除：
 
 | 項目 | 說明 |
@@ -50,8 +50,8 @@ http://www.813.com.tw/WebService/WebService.asmx/HISAPI?_Str=<base64>
 除此之外，本擴充功能不會連線到任何其他伺服器，也不會連線到開發者的伺服器
 （開發者並未架設任何伺服器）。
 
-該網站僅提供 http、未提供 https，因此 `manifest.json` 中的主機權限為
-`http://www.813.com.tw/*`。
+目前查詢使用 HTTP API。Chrome 原始 manifest 與 Firefox 套件的主機權限都限定在
+`www.813.com.tw`，列出 HTTP 和 HTTPS 網址模式；擴充功能實際發出的請求是上方固定的 HTTP 網址。
 
 ## 權限說明
 
@@ -60,8 +60,11 @@ http://www.813.com.tw/WebService/WebService.asmx/HISAPI?_Str=<base64>
 | `storage` | 儲存上述設定於本機 |
 | `alarms` | 定時觸發查詢（MV3 背景服務會休眠，計時器不可靠） |
 | `notifications` | 顯示看診進度提醒，這是本擴充功能的核心功能 |
-| `offscreen` | 播放提示音（背景服務沒有音訊 API） |
-| `http://www.813.com.tw/*` | 讀取上述公開的看診進度資料 |
+| `offscreen`（僅 Chrome） | 在 Chrome 的 offscreen document 播放提示音；Firefox 背景頁使用 Web Audio，不要求此權限 |
+| `http://www.813.com.tw/*`、`https://www.813.com.tw/*` | 讀取上述公開的看診進度資料；目前程式使用 HTTP API |
+
+Firefox 套件使用固定識別碼 `813-hospital-reminder@goodspeed666`，並宣告不蒐集資料。
+Firefox 通知只使用基本通知欄位；Chrome 才使用通知優先級、常駐與系統音效控制選項。
 
 ## 與醫院的關係
 

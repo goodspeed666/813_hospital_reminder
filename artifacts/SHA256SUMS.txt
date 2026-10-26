@@ -1,0 +1,2 @@
+cbced6026d9ed686cd155f2b9d07b1e5f56e4de1c26daf49bbd93af1c75d12a3  artifacts/813-reminder-firefox-1.0.9.zip
+215e10397a8ec0842849b06ddb6cbb6ed221e9b1f3ab860b98f55869729d7bba  artifacts/813-reminder-firefox-1.0.9-source.zip

@@ -4,10 +4,16 @@
 
 ```bash
 node test/logic.test.mjs
+node test/firefox-runtime.test.mjs
+node test/firefox-build.test.mjs
+node test/safe-dom.test.mjs
 ```
 
 用假的 `chrome.*` API 實際載入 `background.js`，跑完整的叫號流程：
 剩 N 號提醒、同號碼不重複、過號、看診結束、跨日清除、台北午夜倒數等。
+
+Firefox 測試檢查通知欄位、Firefox 背景頁提示音，以及產出的 AMO 套件、來源 ZIP 與可重現雜湊。
+安全 DOM 測試會阻止將變動文字插入 HTML 字串。
 
 ## 需要瀏覽器
 
