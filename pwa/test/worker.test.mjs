@@ -280,7 +280,7 @@ console.log('\n共用判斷邏輯（與擴充功能一致）');
   out = evaluate(w, rows('61'), st);
   st = out.states;
   w = out.watches || w;
-  check('已經過號時通知一次並停用監看', out.events[0]?.title.includes('已經過號') && w[0].enabled === false, JSON.stringify({ events: out.events, watches: w }));
+  check('超過號碼時安靜停用監看', out.events.length === 0 && w[0].enabled === false, JSON.stringify({ events: out.events, watches: w }));
   check('停用監看後 allDone 為 true', out.allDone === true, String(out.allDone));
   out = evaluate(w, rows('59'), st);
   st = out.states;
@@ -299,6 +299,20 @@ console.log('\n共用判斷邏輯（與擴充功能一致）');
 
 console.log('\n過號停用邊界');
 {
+  const jumpWatch = { ...WATCH, myNumber: 53, notifyNear: false, notifyOnChange: true, notifyStatus: true };
+  const jumpKey = `${ROOM.shift}|${ROOM.section}|${ROOM.room}`;
+  const beforeJump = {
+    __date: TODAY,
+    [jumpKey]: { progress: '52', phase: 'open', missing: false, notifiedPassed: false }
+  };
+  const jump = evaluate([jumpWatch], rows('82'), beforeJump);
+  check('號碼 53 遇到進度 52 → 82 時靜默停用', jump.events.length === 0 && jump.watches[0].enabled === false, JSON.stringify(jump));
+  const phaseChange = evaluate([jumpWatch], rows('82'), {
+    __date: TODAY,
+    [jumpKey]: { progress: '-', phase: 'idle', missing: false, notifiedPassed: false }
+  });
+  check('跨號時狀態轉換也不發通知', phaseChange.events.length === 0 && phaseChange.watches[0].enabled === false, JSON.stringify(phaseChange));
+
   const passedWatch = { ...WATCH, myNumber: 60, notifyNear: false, notifyOnChange: false, notifyStatus: false };
   let out = evaluate([passedWatch], rows('61'), {});
   let returned = out.watches || [passedWatch];

@@ -159,6 +159,14 @@ export function evaluate(watches, rows, prevStates = {}, opts = {}) {
       notifiedPassed: prev ? prev.notifiedPassed : false
     };
 
+    // Passing the configured number stops this watch silently before any
+    // first-seen, status, near-number, or progress-change notification path.
+    if (passed) {
+      states[key] = state;
+      disableWatch(w);
+      continue;
+    }
+
     // 第一次觀測只記錄基準，不通知
     if (!prev || prev.missing || prev.progress === undefined) {
       states[key] = state;
@@ -204,17 +212,6 @@ export function evaluate(watches, rows, prevStates = {}, opts = {}) {
             urgent: true,
             title: '輪到你了！',
             body: `${label}\n目前叫號 ${curNum}，正是你的號碼`
-          });
-        }
-      } else if (remaining < 0) {
-        if (!state.notifiedPassed) {
-          state.notifiedPassed = true;
-          fired = true;
-          events.push({
-            key,
-            urgent: true,
-            title: '已經過號',
-            body: `${label}\n目前叫號 ${curNum}，你的號碼 ${w.myNumber}`
           });
         }
       } else {

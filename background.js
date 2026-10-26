@@ -292,6 +292,13 @@ async function doPoll(reason) {
       notifiedPassed: prev ? prev.notifiedPassed : false
     };
 
+    // Passing the configured number stops this watch silently. Do not reach
+    // the first-seen, phase, near-number, or progress-change notification paths.
+    if (passed) {
+      nextStates[key] = state;
+      continue;
+    }
+
     // 第一次觀測（或剛換日）只記錄，不通知，避免安裝當下就跳一堆通知
     if (!prev || prev.missing || prev.progress === undefined) {
       nextStates[key] = state;
@@ -328,17 +335,6 @@ async function doPoll(reason) {
             urgent: true,
             title: '輪到你了！',
             message: `${label}\n目前叫號 ${curNum}，正是你的號碼`
-          });
-        }
-      } else if (remaining < 0) {
-        if (!state.notifiedPassed) {
-          state.notifiedPassed = true;
-          nearFired = true;
-          events.push({
-            key,
-            urgent: true,
-            title: '已經過號',
-            message: `${label}\n目前叫號 ${curNum}，你的號碼 ${w.myNumber}`
           });
         }
       } else {

@@ -58,7 +58,7 @@ const initialState = {
   day: today,
   watches: [watch],
   states: {},
-  prefs: { notify: false, push: true, wakeLock: true, sound: false },
+  prefs: { notify: true, push: true, wakeLock: true, sound: false },
   snapshot: null
 };
 const stored = new Map([['813pwa.v1', JSON.stringify(initialState)]]);
@@ -72,7 +72,7 @@ let progressCalls = 0;
 let intervalCallback;
 let lockRequests = 0;
 let lockReleases = 0;
-let rejectRegistration = false;
+let notificationCount = 0;
 let responseProgress = '49';
 let responseStale = false;
 const responseControl = {
@@ -82,16 +82,16 @@ const responseControl = {
   }
 };
 const subscription = { endpoint: 'https://push.example/sub', keys: { p256dh: 'p', auth: 'a' } };
-const registration = { pushManager: { getSubscription: async () => subscription } };
+const registration = {
+  pushManager: { getSubscription: async () => subscription },
+  async showNotification() { notificationCount++; }
+};
 const navigator = {
   userAgent: 'Node test',
   standalone: false,
   serviceWorker: {
     register: async () => ({}),
-    getRegistration: async () => {
-      if (rejectRegistration) throw new Error('service worker unavailable');
-      return registration;
-    },
+    getRegistration: async () => registration,
     ready: Promise.resolve(registration)
   },
   wakeLock: {
@@ -136,7 +136,7 @@ source = source.replace(
   (_, names) => `const {${names}} = globalThis.__logic;`
 );
 source = source.replace(/\ninit\(\);\s*$/, '\nglobalThis.__appStarted = init();');
-source += '\nglobalThis.__appTest = { tick, state: () => state, timer: () => timer, updateWakeLock, setResponse: (progress, stale = false) => globalThis.__responseControl.setResponse(progress, stale) };\n';
+source += '\nglobalThis.__appTest = { tick, state: () => state, timer: () => timer, setResponse: (progress, stale = false) => globalThis.__responseControl.setResponse(progress, stale) };\n';
 
 const context = vm.createContext({
   __logic: logic,
@@ -148,7 +148,7 @@ const context = vm.createContext({
   location: { search: '?api=https://api.example' },
   URLSearchParams,
   fetch: fetchImpl,
-  Notification: { permission: 'default' },
+  Notification: { permission: 'granted' },
   setInterval(fn) { intervalCallback = fn; return 1; },
   clearInterval() {},
   setTimeout() { return 1; },
@@ -177,21 +177,7 @@ for (const listener of documentListeners.visibilitychange || []) listener();
 await new Promise((resolve) => setTimeout(resolve, 0));
 check('停止後 interval 與 visibility 自動更新略過網路', progressCalls === requestsBeforeAutomaticTicks, String(progressCalls));
 
-// Re-enable with a known baseline and make notification setup fail after fetching.
-const stopped = context.__appTest.state().watches[0];
-stopped.enabled = true;
-context.__appTest.state().states[logic.watchKey(stopped)] = { progress: '49', phase: 'open', missing: false, notifiedPassed: false };
-context.__appTest.state().snapshot.error = null;
-context.__appTest.state().prefs.notify = true;
-context.__appTest.state().prefs.push = false;
-localStorage.setItem('813pwa.v1', JSON.stringify(context.__appTest.state()));
-context.__appTest.setResponse('51');
-await context.__appTest.updateWakeLock();
-rejectRegistration = true;
-await context.__appTest.tick();
-const persistedAfterNotificationFailure = JSON.parse(stored.get('813pwa.v1'));
-check('通知初始化失敗仍先持久化 stopped watch', persistedAfterNotificationFailure.watches[0].enabled === false, JSON.stringify(persistedAfterNotificationFailure.watches));
-check('通知初始化失敗仍先釋放 wake lock', lockReleases === 2, String(lockReleases));
+check('超過號碼的過號轉變不呼叫系統通知', notificationCount === 0, String(notificationCount));
 
 console.log(failed === 0 ? '\n全部通過 ✅' : `\n${failed} 項失敗 ❌`);
 process.exit(failed === 0 ? 0 : 1);
