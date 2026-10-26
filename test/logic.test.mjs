@@ -11,6 +11,8 @@ let badge = { text: '', color: '', title: '' };
 let sounds = [];
 let nextData = [];
 let fetchFails = false;
+let fetchCalls = 0;
+let fetchGate = null;
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
@@ -67,6 +69,8 @@ globalThis.chrome = {
 };
 
 globalThis.fetch = async () => {
+  fetchCalls++;
+  if (fetchGate) await fetchGate;
   if (fetchFails) throw new Error('網路錯誤');
   const body = JSON.stringify(nextData);
   return { ok: true, status: 200, text: async () => body };
@@ -174,8 +178,8 @@ await tick('52');
 check('過號只提醒一次', !titles().some((t) => t.includes('已經過號')), titles().join(','));
 
 await tick('看診結束');
-check('狀態轉為看診結束 → 通知', titles().some((t) => t.includes('看診結束')), titles().join(','));
-check('badge 顯示「完」', badge.text === '完', badge.text);
+check('過號後看診結束不再通知', !titles().some((t) => t.includes('看診結束')), titles().join(','));
+check('過號停止後不再把此診間當成啟用監看', badge.text === '', badge.text);
 
 console.log('\n情境 B：只開「進度異動就通知」，關掉快輪到我');
 store.watches = [{ ...ROOM, enabled: true, notifyOnChange: true, notifyNear: false, notifyStatus: true, myNumber: 50, nearThreshold: 3 }];
@@ -221,9 +225,13 @@ check('換日重置基準且不發通知', notifications.length === 0, titles().
 
 fetchFails = true;
 notifications = [];
+store.watches = [{ ...ROOM, enabled: true, notifyOnChange: true, notifyNear: true, notifyStatus: true, myNumber: 50, nearThreshold: 3 }];
+store.states = { __date: todayTaipei() };
+store.snapshot = { fetchedAt: Date.now(), date: todayTaipei(), rows: data('51') };
 for (const f of listeners.alarm) f({ name: 'poll-clinic-progress' });
 await new Promise((r) => setTimeout(r, 250));
 check('抓取失敗不發通知、保留舊資料', notifications.length === 0 && store.snapshot.stale === true, JSON.stringify(store.snapshot?.error));
+check('抓取失敗帶回的過號舊資料不會停用', store.watches[0].enabled === true, JSON.stringify(store.watches[0]));
 fetchFails = false;
 
 console.log('\n情境 F：多診間同時監看');
@@ -436,6 +444,85 @@ console.log('\n情境 P：台北午夜倒數計算');
   // UTC 04:00 = 台北 12:00 → 剩 12 小時
   check('台北 12:00 時剩約 12 小時', Math.abs(at('2026-08-04T04:00:00Z') - (12 * 3600000 + 5000)) < 1500, String(at('2026-08-04T04:00:00Z')));
   check('永遠為正數（不會排到過去）', at('2026-08-04T15:59:59Z') > 0 && at('2026-08-04T16:00:01Z') > 0);
+}
+
+console.log('\n情境 Q：我的號碼已過就停止監看');
+{
+  store.watches = [{ ...ROOM, enabled: true, notifyOnChange: false, notifyNear: false, notifyStatus: false, myNumber: 50, nearThreshold: 3 }];
+  store.states = { __date: todayTaipei() }; store.day = todayTaipei(); store.schemaVersion = 2;
+  notifications = [];
+  await tick('51');
+  check('首次看到已過號也會停止監看', store.watches[0].enabled === false, JSON.stringify(store.watches[0]));
+  check('首次看到已過號依既有首次觀測政策保持靜默', notifications.length === 0, titles().join(','));
+
+  store.watches = [{ ...ROOM, enabled: true, notifyOnChange: true, notifyNear: true, notifyStatus: true, myNumber: 50, nearThreshold: 3 }];
+  store.states = { __date: todayTaipei() }; store.day = todayTaipei();
+  await tick('50');
+  check('目前號碼等於我的號碼時仍啟用監看', store.watches[0].enabled === true, JSON.stringify(store.watches[0]));
+  await tick('51');
+  check('進度超過號碼時發出一次過號提醒並停用', store.watches[0].enabled === false && titles().filter((t) => t.includes('已經過號')).length === 1, `${JSON.stringify(store.watches[0])} ${titles().join(',')}`);
+  check('停用只改 enabled，保留號碼與提醒設定', store.watches[0].myNumber === 50 && store.watches[0].notifyNear && store.watches[0].notifyStatus, JSON.stringify(store.watches[0]));
+  check('停用後自動診間輪詢 alarm 已清除，日清 alarm 保留', alarms['poll-clinic-progress'] === undefined && !!alarms['daily-reset'], JSON.stringify(alarms));
+
+  notifications = [];
+  nextData = data('52');
+  const callsBeforeAutomaticTick = fetchCalls;
+  await tick('52');
+  check('停用後自動輪詢事件不再打網路', fetchCalls === callsBeforeAutomaticTick && store.snapshot.rows[0].CLC_MAXIMUM === '51', String(fetchCalls));
+  await poll_manual();
+  check('停用後手動更新仍可抓資料但不再通知', notifications.length === 0 && store.snapshot.rows[0].CLC_MAXIMUM === '52', titles().join(','));
+  nextData = data('49');
+  await poll_manual();
+  check('進度回退不會重新啟用或通知', store.watches[0].enabled === false && notifications.length === 0, JSON.stringify(store.watches[0]));
+  nextData = data('看診結束');
+  await poll_manual();
+  check('停用後看診結束不再通知', notifications.length === 0, titles().join(','));
+}
+
+console.log('\n情境 Q2：沒有有效叫號資料時不停止監看');
+{
+  const quietWatch = { ...ROOM, enabled: true, notifyOnChange: false, notifyNear: false, notifyStatus: false, myNumber: 50, nearThreshold: 3 };
+  store.watches = [{ ...quietWatch }];
+  store.states = { __date: todayTaipei() };
+  await tick('進度更新中');
+  check('非數字進度不會停用', store.watches[0].enabled === true, JSON.stringify(store.watches[0]));
+
+  store.watches = [{ ...quietWatch, myNumber: null }];
+  store.states = { __date: todayTaipei() };
+  await tick('61');
+  check('未設定我的號碼不會停用', store.watches[0].enabled === true, JSON.stringify(store.watches[0]));
+
+  store.watches = [{ ...quietWatch }];
+  store.states = { __date: todayTaipei() };
+  await tick('看診結束');
+  check('看診結束狀態不會被當成過號停用', store.watches[0].enabled === true, JSON.stringify(store.watches[0]));
+
+  store.watches = [{ ...quietWatch }];
+  store.states = { __date: todayTaipei() };
+  nextData = data('61').filter((row) => row.ROM_RONAME !== ROOM.room);
+  notifications = [];
+  for (const listener of listeners.alarm) listener({ name: 'poll-clinic-progress' });
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  check('診間缺少時不會停用', store.watches[0].enabled === true, JSON.stringify(store.watches[0]));
+}
+
+console.log('\n情境 R：抓取期間更改我的號碼不覆蓋新設定');
+{
+  store.watches = [{ ...ROOM, enabled: true, notifyOnChange: false, notifyNear: true, notifyStatus: true, myNumber: 50, nearThreshold: 3 }];
+  store.states = { __date: todayTaipei() };
+  await tick('49');
+
+  let releaseFetch;
+  fetchGate = new Promise((resolve) => { releaseFetch = resolve; });
+  nextData = data('51');
+  const pending = poll_manual();
+  await new Promise((r) => setTimeout(r, 20));
+  store.watches = [{ ...store.watches[0], myNumber: 52, enabled: true, notifyNear: false }];
+  releaseFetch();
+  fetchGate = null;
+  await pending;
+  check('只依舊號碼判斷，不把新號碼設定停用', store.watches[0].enabled === true && store.watches[0].myNumber === 52, JSON.stringify(store.watches[0]));
+  check('新設定的其他欄位也保留', store.watches[0].notifyNear === false, JSON.stringify(store.watches[0]));
 }
 
 console.log(failed === 0 ? '\n全部通過 ✅' : `\n${failed} 項失敗 ❌`);

@@ -168,7 +168,6 @@ async function pollAndPush(env) {
   const list = await env.STATE.list({ prefix: 'sub:' });
   if (!list.keys.length) return { subs: 0, pushed: 0, skipped: '無訂閱' };
 
-  const today = todayInTaipei();
   const records = [];
   for (const k of list.keys) {
     const r = await env.STATE.get(k.name, 'json');
@@ -188,8 +187,15 @@ async function pollAndPush(env) {
 
   let pushed = 0;
   const canPush = Boolean(env.VAPID_PRIVATE_KEY);
+  const today = todayInTaipei();
 
-  for (const rec of records) {
+  for (const listedRec of records) {
+    // /api/subscribe may update a watch while the hospital request is in flight.
+    // Always evaluate and persist the latest record, and skip subscriptions that
+    // were deleted while fetching.
+    const rec = await env.STATE.get('sub:' + listedRec.id, 'json');
+    if (!rec) continue;
+
     // 防呆：跨日但半夜的排程沒跑到時，這裡也會重置
     if (rec.day !== today) {
       rec.watches = [];
@@ -199,16 +205,25 @@ async function pollAndPush(env) {
       continue;
     }
 
-    const { events, states, allDone } = evaluate(rec.watches || [], snapshot.rows, rec.states || {});
+    // A request that crossed midnight can still return yesterday's cached rows.
+    // Do not use them to stop a watch configured for the new day.
+    if (snapshot.date && snapshot.date !== today) continue;
+
+    const { events, states, watches, allDone } = evaluate(rec.watches || [], snapshot.rows, rec.states || {});
     if (allDone && !events.length) {
-      if (JSON.stringify(states) !== JSON.stringify(rec.states)) {
+      const changed = JSON.stringify(states) !== JSON.stringify(rec.states) ||
+        JSON.stringify(watches) !== JSON.stringify(rec.watches || []);
+      if (changed) {
         rec.states = states;
+        rec.watches = watches;
+        rec.updatedAt = Date.now();
         await env.STATE.put('sub:' + rec.id, JSON.stringify(rec), { expirationTtl: 30 * 86400 });
       }
       continue;
     }
 
     rec.states = states;
+    rec.watches = watches;
     rec.updatedAt = Date.now();
     await env.STATE.put('sub:' + rec.id, JSON.stringify(rec), { expirationTtl: 30 * 86400 });
 

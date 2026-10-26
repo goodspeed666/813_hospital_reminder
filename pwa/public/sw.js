@@ -1,5 +1,5 @@
 // Service Worker：離線快取 + 背景推播接收
-const CACHE = '813-pwa-v1';
+const CACHE = '813-pwa-v2';
 const ASSETS = [
   './',
   'index.html',

@@ -62,10 +62,14 @@ function rows(progress) {
 let currentProgress = '50';
 let hospitalHits = 0;
 let pushes = [];
+let hospitalFetchGate = null;
+let onHospitalFetchStarted = null;
 globalThis.fetch = async (url) => {
   const u = String(url);
   if (u.includes('813.com.tw')) {
     hospitalHits++;
+    onHospitalFetchStarted?.();
+    if (hospitalFetchGate) await hospitalFetchGate;
     return { ok: true, status: 200, text: async () => JSON.stringify(rows(currentProgress)) };
   }
   // 推播端點
@@ -142,6 +146,71 @@ console.log('\n每分鐘排程：狀態有正確寫回 KV');
   check('已記錄當日日期', rec.states.__date === TODAY);
 }
 
+console.log('\nWorker：過號後寫回停用狀態');
+{
+  const kv = makeKV();
+  makeSub(kv, [WATCH]);
+  currentProgress = '61';
+  await pollAndPush(makeEnv(kv));
+  let rec = JSON.parse(kv._map.get('sub:abc'));
+  check('首次觀測已過號後將 enabled:false 寫回 KV', rec.watches[0].enabled === false, JSON.stringify(rec.watches));
+  check('首次觀測靜默停止仍有保存進度基準', rec.states[`${ROOM.shift}|${ROOM.section}|${ROOM.room}`]?.progress === '61', JSON.stringify(rec.states));
+
+  // 轉態路徑會有一次過號事件；沒有 VAPID 設定時只驗證持久化。
+  const kv2 = makeKV();
+  const sub = makeSub(kv2, [WATCH]);
+  sub.states = evaluate([WATCH], rows('60'), {}).states;
+  await kv2.put('sub:abc', JSON.stringify(sub));
+  currentProgress = '61';
+  await pollAndPush(makeEnv(kv2));
+  rec = JSON.parse(kv2._map.get('sub:abc'));
+  check('越過號碼的轉態也將 enabled:false 寫回 KV', rec.watches[0].enabled === false, JSON.stringify(rec.watches));
+  check('停用紀錄保留我的號碼', rec.watches[0].myNumber === 60, JSON.stringify(rec.watches[0]));
+}
+
+console.log('\nWorker：抓取期間採用最新的訂閱設定');
+{
+  const kv = makeKV();
+  const sub = makeSub(kv, [WATCH]);
+  sub.states = evaluate([WATCH], rows('50'), {}).states;
+  await kv.put('sub:abc', JSON.stringify(sub));
+
+  let releaseFetch;
+  const started = new Promise((resolve) => { onHospitalFetchStarted = resolve; });
+  hospitalFetchGate = new Promise((resolve) => { releaseFetch = resolve; });
+  currentProgress = '61';
+  const pending = pollAndPush(makeEnv(kv));
+  await started;
+
+  const latest = await kv.get('sub:abc', 'json');
+  latest.watches = [{ ...WATCH, myNumber: 70, nearThreshold: 8, notifyNear: false, notifyOnChange: true, notifyStatus: false }];
+  latest.prefs = { ...latest.prefs, clientRevision: 'updated-during-fetch' };
+  await kv.put('sub:abc', JSON.stringify(latest));
+  releaseFetch();
+  hospitalFetchGate = null;
+  onHospitalFetchStarted = null;
+  await pending;
+
+  const rec = await kv.get('sub:abc', 'json');
+  check('舊的號碼 60 不會停用新的號碼 70', rec.watches[0].enabled === true && rec.watches[0].myNumber === 70, JSON.stringify(rec.watches));
+  check('新提醒設定與訂閱欄位都保留', rec.watches[0].notifyNear === false && rec.watches[0].nearThreshold === 8 && rec.prefs.clientRevision === 'updated-during-fetch', JSON.stringify(rec));
+  check('用最新設定評估後仍保存當前進度', rec.states[`${ROOM.shift}|${ROOM.section}|${ROOM.room}`]?.progress === '61', JSON.stringify(rec.states));
+
+  const deletedKV = makeKV();
+  makeSub(deletedKV, [WATCH]);
+  let releaseDeletedFetch;
+  const deletedFetchStarted = new Promise((resolve) => { onHospitalFetchStarted = resolve; });
+  hospitalFetchGate = new Promise((resolve) => { releaseDeletedFetch = resolve; });
+  const deletedPending = pollAndPush(makeEnv(deletedKV));
+  await deletedFetchStarted;
+  await deletedKV.delete('sub:abc');
+  releaseDeletedFetch();
+  hospitalFetchGate = null;
+  onHospitalFetchStarted = null;
+  await deletedPending;
+  check('抓取期間被刪除的訂閱不會由舊快照寫回', !deletedKV._map.has('sub:abc'));
+}
+
 console.log('\n每分鐘排程：跨日時自動重置（半夜排程沒跑到的防呆）');
 {
   const kv = makeKV();
@@ -185,36 +254,82 @@ console.log('\n凌晨排程：沒有任何訂閱時也不會出錯');
 console.log('\n共用判斷邏輯（與擴充功能一致）');
 {
   let st = {};
-  const w = [WATCH];
+  let w = [WATCH];
   let out = evaluate(w, rows('50'), st);
   st = out.states;
+  check('回傳更新後的監看清單', Array.isArray(out.watches), JSON.stringify(out));
+  w = out.watches || w;
   check('首次觀測不通知', out.events.length === 0);
 
   out = evaluate(w, rows('57'), st);
   st = out.states;
+  w = out.watches || w;
   check('剩 3 號 → 快輪到你了', out.events[0]?.title.includes('還剩 3 位'), JSON.stringify(out.events));
 
   out = evaluate(w, rows('57'), st);
   st = out.states;
+  w = out.watches || w;
   check('同號碼不重複通知', out.events.length === 0);
 
   out = evaluate(w, rows('60'), st);
   st = out.states;
+  w = out.watches || w;
   check('輪到你了', out.events[0]?.title.includes('輪到你了'));
+  check('相等號碼仍保持啟用', w[0]?.enabled === true, JSON.stringify(w));
 
   out = evaluate(w, rows('61'), st);
   st = out.states;
-  check('已經過號（只一次）', out.events[0]?.title.includes('已經過號'));
-  out = evaluate(w, rows('62'), st);
+  w = out.watches || w;
+  check('已經過號時通知一次並停用監看', out.events[0]?.title.includes('已經過號') && w[0].enabled === false, JSON.stringify({ events: out.events, watches: w }));
+  check('停用監看後 allDone 為 true', out.allDone === true, String(out.allDone));
+  out = evaluate(w, rows('59'), st);
   st = out.states;
-  check('過號不重複', out.events.length === 0);
+  w = out.watches || w;
+  check('停用後進度回退也不再通知或恢復', out.events.length === 0 && w[0].enabled === false, JSON.stringify({ events: out.events, watches: w }));
 
   out = evaluate(w, rows('看診結束'), st);
-  check('看診結束 → 通知且 allDone', out.events[0]?.title === '看診結束' && out.allDone === true);
+  check('停止監看後看診結束不再通知，allDone 為 true', out.events.length === 0 && out.allDone === true);
 
   // 尚未開診不可被當成結束
-  const out2 = evaluate(w, rows('-'), {});
-  check('尚未開診時 allDone 為 false', out2.allDone === false);
+  const out2 = evaluate([WATCH], rows('-'), {});
+  check('啟用監看尚未開診時 allDone 為 false', out2.allDone === false);
+  const out3 = evaluate(w, rows('-'), {});
+  check('已停用監看後尚未開診仍保持 allDone', out3.allDone === true);
+}
+
+console.log('\n過號停用邊界');
+{
+  const passedWatch = { ...WATCH, myNumber: 60, notifyNear: false, notifyOnChange: false, notifyStatus: false };
+  let out = evaluate([passedWatch], rows('61'), {});
+  let returned = out.watches || [passedWatch];
+  check('初次觀測已過號時靜默停用', out.events.length === 0 && returned[0].enabled === false, JSON.stringify(out));
+  check('初次停用保留監看設定', returned[0].myNumber === 60 && returned[0].notifyNear === false, JSON.stringify(returned[0]));
+
+  let states = {};
+  let watches = [passedWatch];
+  out = evaluate(watches, rows('60'), states);
+  states = out.states;
+  watches = out.watches || watches;
+  out = evaluate(watches, rows('61'), states);
+  check('通知選項全關仍會因過號停用', out.events.length === 0 && out.watches?.[0]?.enabled === false, JSON.stringify(out));
+
+  const untouched = { ...WATCH, myNumber: 60 };
+  for (const progress of ['-', '進度更新中', '看診結束']) {
+    const r = evaluate([untouched], rows(progress), {});
+    check(`${progress} 不會因非數字/結束狀態而停用`, (r.watches || [untouched])[0].enabled === true, JSON.stringify(r.watches));
+  }
+  const missing = evaluate([untouched], rows('61').filter((r) => r.ROM_RONAME !== ROOM.room), {});
+  check('缺少診間資料時不會停用', (missing.watches || [untouched])[0].enabled === true, JSON.stringify(missing.watches));
+
+  for (const myNumber of [null, NaN, Infinity, 'no-number']) {
+    const noFiniteNumber = { ...WATCH, myNumber };
+    const r = evaluate([noFiniteNumber], rows('61'), {});
+    check(`號碼 ${String(myNumber)} 不是有限數字時不會停用`, (r.watches || [noFiniteNumber])[0].enabled === true, JSON.stringify(r.watches));
+  }
+
+  const other = { ...WATCH, shift: '上午', section: '眼科', room: '眼科一診', doctor: '李美玲', myNumber: 100 };
+  const mixed = evaluate([passedWatch, other], rows('61'), {});
+  check('多診間只停用超過號碼的那一筆', mixed.watches?.[0]?.enabled === false && mixed.watches?.[1]?.enabled === true, JSON.stringify(mixed.watches));
 }
 
 console.log('\n時區處理');

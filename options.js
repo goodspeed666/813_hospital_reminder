@@ -203,7 +203,7 @@ function renderList() {
 function clinicRow(row) {
   const key = rowKey(row);
   const watch = watchMap.get(key);
-  const on = !!watch;
+  const on = !!watch && watch.enabled !== false;
 
   const el = document.createElement('div');
   el.className = 'clinic' + (on ? ' on' : '');
@@ -219,12 +219,15 @@ function clinicRow(row) {
 
   main.querySelector('input').addEventListener('change', (e) => {
     if (e.target.checked) {
+      const existing = watchMap.get(key);
       watchMap.set(key, {
         ...DEFAULT_WATCH,
+        ...existing,
         shift: row.SHI_EASYNAME,
         section: row.SEC_SENAME,
         room: row.ROM_RONAME,
-        doctor: row.EMP_EMPNAME
+        doctor: row.EMP_EMPNAME,
+        enabled: true
       });
     } else {
       watchMap.delete(key);
@@ -234,7 +237,7 @@ function clinicRow(row) {
     render();
   });
 
-  if (on) el.appendChild(detailPanel(key, watch));
+  if (watch) el.appendChild(detailPanel(key, watch));
   return el;
 }
 
@@ -248,6 +251,7 @@ function detailPanel(key, watch) {
   const d = document.createElement('div');
   d.className = 'detail';
   d.innerHTML = `
+    ${watch.enabled === false ? '<div class="muted small">已過號，已停止監看。更改號碼並儲存即可重新啟用。</div>' : ''}
     <label title="填了號碼才能做「快輪到我」提醒；留空則只在進度異動時通知">
       我的號碼
       <input type="number" min="0" step="1" class="my-number" value="${
@@ -277,7 +281,7 @@ function detailPanel(key, watch) {
 
   d.querySelector('.my-number').addEventListener('input', (e) => {
     const v = e.target.value.trim();
-    upd({ myNumber: v === '' ? null : Math.max(0, parseInt(v, 10) || 0) });
+    upd({ myNumber: v === '' ? null : Math.max(0, parseInt(v, 10) || 0), enabled: true });
   });
   d.querySelector('.near-threshold').addEventListener('input', (e) => {
     upd({ nearThreshold: Math.max(1, parseInt(e.target.value, 10) || 3) });
@@ -304,13 +308,28 @@ function renderOrphans() {
   box.innerHTML = '';
 
   for (const [key, w] of orphans) {
+    const item = document.createElement('div');
+    item.className = 'orphan-wrap';
     const el = document.createElement('div');
     el.className = 'orphan';
     el.innerHTML = `
       <span class="grow">${escapeHtml(w.section)}／${escapeHtml(w.room)}
         <span class="muted small">（${escapeHtml(w.shift)}${
           w.myNumber != null ? '・我的號碼 ' + w.myNumber : ''
-        }）</span></span>`;
+        }）</span>${w.enabled === false ? '<span class="muted small">已停止監看</span>' : ''}</span>`;
+    if (w.enabled === false) {
+      const resume = document.createElement('button');
+      resume.className = 'orphan-resume';
+      resume.textContent = '重新啟用';
+      resume.addEventListener('click', () => {
+        const current = watchMap.get(key);
+        if (!current) return;
+        watchMap.set(key, { ...current, enabled: true });
+        markDirty();
+        render();
+      });
+      el.appendChild(resume);
+    }
     const btn = document.createElement('button');
     btn.textContent = '移除';
     btn.addEventListener('click', () => {
@@ -320,7 +339,9 @@ function renderOrphans() {
       render();
     });
     el.appendChild(btn);
-    box.appendChild(el);
+    item.appendChild(el);
+    if (w.enabled === false) item.appendChild(detailPanel(key, w));
+    box.appendChild(item);
   }
 }
 

@@ -136,6 +136,8 @@ const DEFAULT_API = 'https://813-reminder.你的帳號.workers.dev';
 - **開始看診 / 看診結束**：狀態改變時各一次
 - **每次叫號變動都通知**：預設關閉（手機上太吵），可在單一診間設定裡打開
 
+當最新的數字進度**大於你填的號碼**時，該診間會停止監看；第一次查詢就已過號時會安靜停用，平常則保留一次「已經過號」提醒。所有監看都停用後，App 前景與 Worker 都會停止自動查詢；手動重新整理仍可用。想再監看時，打開該診間的號碼設定、更改號碼並儲存即可重新啟用。
+
 ---
 
 ## 每天凌晨自動清除
@@ -189,6 +191,7 @@ test/                  測試（見下）
 ```bash
 node test/push.test.mjs     # 推播加密：自己加密→自己解密，逐項比對
 node test/worker.test.mjs   # Worker 排程與凌晨清除（用假的 KV）
+node test/app-stop-passed.test.mjs # 前端停止監看、同步與自動查詢行為
 node test/pwa.test.mjs      # 真的 Chromium 跑一遍介面流程
 ```
 

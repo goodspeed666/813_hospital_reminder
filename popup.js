@@ -65,7 +65,8 @@ async function togglePause() {
 
 function render() {
   const { settings, watches, snapshot, pollMode } = store;
-  const idle = pollMode === 'idle' && watches.some((w) => w.enabled);
+  const enabled = watches.filter((w) => w.enabled);
+  const idle = pollMode === 'idle' && enabled.length > 0;
 
   const pauseBtn = $('#btn-pause');
   pauseBtn.innerHTML = settings.paused ? ICON_PLAY : ICON_PAUSE;
@@ -79,6 +80,8 @@ function render() {
     $('#updated').textContent = `停留在 ${formatTime(snapshot?.fetchedAt)}・按播放鍵繼續`;
   } else if (idle) {
     $('#updated').textContent = `今日看診已結束・已停止查詢`;
+  } else if (!enabled.length) {
+    $('#updated').textContent = `停留在 ${formatTime(snapshot?.fetchedAt)}・目前沒有啟用中的監看`;
   } else {
     $('#updated').textContent = `${formatTime(snapshot?.fetchedAt)} 更新・每 ${every}自動查詢`;
   }
@@ -93,11 +96,21 @@ function render() {
     list.appendChild(e);
   }
 
-  const enabled = watches.filter((w) => w.enabled);
   if (!enabled.length) {
+    const byKey = new Map((snapshot?.rows || []).map((r) => [rowKey(r), r]));
+    const stoppedPassed =
+      !snapshot?.error && !snapshot?.stale &&
+      watches.some((w) => {
+        if (w.enabled !== false || w.myNumber == null || String(w.myNumber).trim() === '') return false;
+        const current = progressNum(byKey.get(watchKey(w))?.CLC_MAXIMUM);
+        const mine = Number(w.myNumber);
+        return current != null && Number.isFinite(mine) && current > mine;
+      });
     const d = document.createElement('div');
     d.className = 'empty';
-    d.innerHTML = '尚未設定要監看的診間。<br />到設定頁勾選科別與診間就會開始提醒。';
+    d.innerHTML = stoppedPassed
+      ? '已過號，已停止監看。<br />到設定頁更改號碼並儲存，即可重新開始監看。'
+      : '尚未設定啟用中的監看診間。<br />到設定頁勾選科別與診間就會開始提醒。';
     const b = document.createElement('button');
     b.className = 'primary';
     b.textContent = '前往設定';

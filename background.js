@@ -147,6 +147,10 @@ async function setupAlarm(mode) {
     await updateBadge();
     return;
   }
+  if (!store.watches.some((w) => w.enabled)) {
+    await updateBadge();
+    return;
+  }
   // 監看的診間今天都已看診結束時，改成 30 分鐘確認一次就好（等隔天班表出來再恢復）
   // Chrome 對已封裝的擴充功能，週期下限為 0.5 分鐘（30 秒）
   const period =
@@ -171,6 +175,12 @@ function nothingLeftToWatch(watches, byKey) {
     if (!row) return true;
     return phaseOf(row.CLC_MAXIMUM) === 'finished';
   });
+}
+
+function configuredNumber(value) {
+  if (value == null || String(value).trim() === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 // ---------------------------------------------------------------- 輪詢主流程
@@ -205,6 +215,12 @@ async function doPoll(reason) {
   // 日期檢查已經在 poll() 裡做過了，這裡只負責抓取與比對
   const { settings, watches, states, pollMode } = await getStore();
   if (settings.paused && reason !== 'manual') return;
+  if (reason !== 'manual' && !watches.some((w) => w.enabled)) {
+    await chrome.alarms.clear(ALARM_NAME);
+    if (pollMode !== 'idle') await chrome.storage.local.set({ pollMode: 'idle' });
+    await updateBadge();
+    return;
+  }
 
   let rows = null;
   let error = null;
@@ -240,6 +256,7 @@ async function doPoll(reason) {
   const byKey = new Map(rows.map((r) => [rowKey(r), r]));
   const nextStates = { ...states };
   const events = [];
+  const passedNumbers = new Map();
 
   // 換日：重置比對基準，不發通知
   const prevDate = states.__date;
@@ -263,6 +280,9 @@ async function doPoll(reason) {
     const cur = row.CLC_MAXIMUM;
     const curNum = progressNum(cur);
     const curPhase = phaseOf(cur);
+    const myNumber = configuredNumber(w.myNumber);
+    const passed = curNum != null && myNumber != null && curNum > myNumber;
+    if (passed) passedNumbers.set(key, w.myNumber);
     const state = {
       progress: cur,
       now: row.CLC_VISITNO_NOW,
@@ -284,8 +304,8 @@ async function doPoll(reason) {
 
     // 1) 快輪到我了 —— 優先權最高，訊息裡會一併帶到進度變化
     let nearFired = false;
-    if (w.notifyNear && w.myNumber != null && curNum != null) {
-      const remaining = Number(w.myNumber) - curNum;
+    if (w.notifyNear && myNumber != null && curNum != null) {
+      const remaining = myNumber - curNum;
       const threshold = Number(w.nearThreshold ?? 3);
       if (remaining > 0 && remaining <= threshold) {
         if (state.notifiedRemaining !== remaining) {
@@ -351,8 +371,8 @@ async function doPoll(reason) {
     // 3) 進度號碼異動
     if (!fired && w.notifyOnChange && changed) {
       const extra =
-        w.myNumber != null && curNum != null
-          ? `　你是 ${w.myNumber} 號，還有 ${Math.max(0, Number(w.myNumber) - curNum)} 位`
+        myNumber != null && curNum != null
+          ? `　你是 ${w.myNumber} 號，還有 ${Math.max(0, myNumber - curNum)} 位`
           : '';
       events.push({
         key,
@@ -365,21 +385,40 @@ async function doPoll(reason) {
     nextStates[key] = state;
   }
 
-  await chrome.storage.local.set({ states: nextStates });
+  // Merge stop flags into the latest saved watches so a settings change made
+  // while fetchProgress() was in flight is preserved.
+  const latestWatches = (await getStore()).watches;
+  let updatedWatches = latestWatches;
+  for (const [key, number] of passedNumbers) {
+    const index = updatedWatches.findIndex((w) => watchKey(w) === key);
+    if (index === -1 || !updatedWatches[index].enabled || updatedWatches[index].myNumber !== number) continue;
+    if (updatedWatches === latestWatches) updatedWatches = latestWatches.slice();
+    updatedWatches[index] = { ...updatedWatches[index], enabled: false };
+  }
+
+  await chrome.storage.local.set({
+    states: nextStates,
+    ...(updatedWatches === latestWatches ? {} : { watches: updatedWatches })
+  });
 
   // 監看的診間都看診結束了就停止密集查詢，改成 30 分鐘確認一次，
   // 等隔天班表出來（或診間重新開診）再自動恢復原本的頻率。
-  const nextMode = nothingLeftToWatch(watches, byKey) ? 'idle' : 'active';
+  const anyEnabled = updatedWatches.some((w) => w.enabled);
+  const nextMode = nothingLeftToWatch(updatedWatches, byKey) ? 'idle' : 'active';
   if (nextMode !== pollMode) await chrome.storage.local.set({ pollMode: nextMode });
   if (!settings.paused) {
     // 直接比對「實際的 alarm 週期」而不是只看模式有沒有變，
     // 這樣即使狀態不同步（例如瀏覽器重啟、設定被外部改動）也會自我修正
-    const want =
-      nextMode === 'idle'
-        ? IDLE_PERIOD_MINUTES
-        : Math.max(0.5, Number(settings.intervalMinutes) || 0.5);
-    const cur = await chrome.alarms.get(ALARM_NAME);
-    if (!cur || cur.periodInMinutes !== want) await setupAlarm(nextMode);
+    if (!anyEnabled) {
+      await setupAlarm(nextMode);
+    } else {
+      const want =
+        nextMode === 'idle'
+          ? IDLE_PERIOD_MINUTES
+          : Math.max(0.5, Number(settings.intervalMinutes) || 0.5);
+      const cur = await chrome.alarms.get(ALARM_NAME);
+      if (!cur || cur.periodInMinutes !== want) await setupAlarm(nextMode);
+    }
   }
 
   await updateBadge();
@@ -470,7 +509,19 @@ async function updateBadge() {
   const enabled = watches.filter((w) => w.enabled);
   if (!enabled.length) {
     await chrome.action.setBadgeText({ text: '' });
-    await chrome.action.setTitle({ title: '813國軍桃園總醫院新竹分院 看診進度提醒（尚未設定監看診間）' });
+    const stoppedPassed =
+      !snapshot?.error && !snapshot?.stale &&
+      watches.some((w) => {
+        const row = (snapshot?.rows || []).find((r) => rowKey(r) === watchKey(w));
+        const current = progressNum(row?.CLC_MAXIMUM);
+        const myNumber = configuredNumber(w.myNumber);
+        return w.enabled === false && current != null && myNumber != null && current > myNumber;
+      });
+    await chrome.action.setTitle({
+      title: stoppedPassed
+        ? '813國軍桃園總醫院新竹分院 看診進度提醒（已過號，已停止監看）'
+        : '813國軍桃園總醫院新竹分院 看診進度提醒（尚未設定監看診間）'
+    });
     return;
   }
 

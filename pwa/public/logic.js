@@ -111,12 +111,18 @@ export const DEFAULT_WATCH = {
  * 比對一輪資料，產生要發出的通知，並回傳新的比對狀態。
  * 純函式，不碰 I/O，方便測試。
  *
- * @returns {{events: Array, states: Object, allDone: boolean}}
+ * @returns {{events: Array, states: Object, watches: Array, allDone: boolean}}
  */
 export function evaluate(watches, rows, prevStates = {}, opts = {}) {
   const byKey = new Map(rows.map((r) => [rowKey(r), r]));
   const states = { ...prevStates };
   const events = [];
+  let updatedWatches = watches;
+  const disableWatch = (watch) => {
+    if (updatedWatches === watches) updatedWatches = watches.slice();
+    const index = watches.indexOf(watch);
+    if (index !== -1) updatedWatches[index] = { ...watch, enabled: false };
+  };
   const date = rows.length ? rows[0].SCD_VISITDT : null;
 
   // 換日：重置比對基準，不發通知
@@ -140,6 +146,11 @@ export function evaluate(watches, rows, prevStates = {}, opts = {}) {
     const cur = row.CLC_MAXIMUM;
     const curNum = progressNum(cur);
     const curPhase = phaseOf(cur);
+    const configuredNumber = w.myNumber;
+    const myNumber = configuredNumber != null && String(configuredNumber).trim() !== '' && Number.isFinite(Number(configuredNumber))
+      ? Number(configuredNumber)
+      : null;
+    const passed = curNum != null && myNumber != null && curNum > myNumber;
     const state = {
       progress: cur,
       phase: curPhase,
@@ -151,7 +162,8 @@ export function evaluate(watches, rows, prevStates = {}, opts = {}) {
     // 第一次觀測只記錄基準，不通知
     if (!prev || prev.missing || prev.progress === undefined) {
       states[key] = state;
-      if (opts.firstSeenNotify) {
+      if (passed) disableWatch(w);
+      if (opts.firstSeenNotify && !passed) {
         events.push({
           key,
           urgent: false,
@@ -168,8 +180,8 @@ export function evaluate(watches, rows, prevStates = {}, opts = {}) {
     let fired = false;
 
     // 1) 快輪到我了
-    if (w.notifyNear && w.myNumber != null && curNum != null) {
-      const remaining = Number(w.myNumber) - curNum;
+    if (w.notifyNear && myNumber != null && curNum != null) {
+      const remaining = myNumber - curNum;
       const threshold = Number(w.nearThreshold ?? 3);
       if (remaining > 0 && remaining <= threshold) {
         if (state.notifiedRemaining !== remaining) {
@@ -244,15 +256,17 @@ export function evaluate(watches, rows, prevStates = {}, opts = {}) {
     }
 
     states[key] = state;
+    if (passed) disableWatch(w);
   }
 
   // 監看的診間是否都沒東西好追了（看診結束或今日無此診）
+  const updatedEnabled = updatedWatches.filter((w) => w.enabled !== false);
   const allDone =
-    enabled.length === 0 ||
-    enabled.every((w) => {
+    updatedEnabled.length === 0 ||
+    updatedEnabled.every((w) => {
       const row = byKey.get(watchKey(w));
       return !row || phaseOf(row.CLC_MAXIMUM) === 'finished';
     });
 
-  return { events, states, allDone };
+  return { events, states, watches: updatedWatches, allDone };
 }

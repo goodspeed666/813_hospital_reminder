@@ -114,18 +114,31 @@ async function fetchProgress(force = false) {
 
 async function tick(force = false) {
   clearIfNewDay();
+  if (!force && !state.watches.some((w) => w.enabled !== false)) {
+    render();
+    return;
+  }
+  let watchesChanged = false;
+  let events = [];
   try {
     const snap = await fetchProgress(force);
     rows = snap.rows;
-    state.snapshot = { fetchedAt: snap.fetchedAt, date: snap.date, error: snap.error || null };
+    state.snapshot = { fetchedAt: snap.fetchedAt, date: snap.date, error: snap.error || null, stale: !!snap.stale };
 
-    if (state.watches.length) {
+    if (!snap.error && !snap.stale && state.watches.length) {
       const out = evaluate(state.watches, rows, state.states);
       state.states = out.states;
-      if (state.prefs.notify) for (const ev of out.events) await showNotification(ev);
-      if (out.events.length && state.prefs.sound) beep(out.events.some((e) => e.urgent));
+      watchesChanged = out.watches !== state.watches;
+      state.watches = out.watches;
+      events = out.events;
     }
     save();
+    if (watchesChanged) {
+      await updateWakeLock();
+      await syncToServer();
+    }
+    if (state.prefs.notify) for (const ev of events) await showNotification(ev);
+    if (events.length && state.prefs.sound) beep(events.some((e) => e.urgent));
   } catch (e) {
     state.snapshot = { ...(state.snapshot || {}), error: String(e.message || e) };
   }
@@ -302,10 +315,19 @@ function render() {
   $('#day-tag').textContent = `${day.slice(4, 6)}/${day.slice(6, 8)}`;
 
   const snap = state.snapshot;
+  const activeWatches = state.watches.some((w) => w.enabled !== false);
+  const passedWatch =
+    !snap?.error && !snap?.stale &&
+    state.watches.some((w) => {
+      if (w.enabled !== false || w.myNumber == null || String(w.myNumber).trim() === '') return false;
+      const current = progressNum(rows.find((r) => rowKey(r) === watchKey(w))?.CLC_MAXIMUM);
+      const mine = Number(w.myNumber);
+      return current != null && Number.isFinite(mine) && current > mine;
+    });
   $('#status').textContent = snap?.error
     ? '查詢失敗：' + snap.error
     : snap
-      ? `${fmtTime(snap.fetchedAt)} 更新・每 30 秒自動查詢`
+      ? `${fmtTime(snap.fetchedAt)} 更新・${activeWatches ? '每 30 秒自動查詢' : '已停止自動查詢'}${passedWatch ? '・已過號，已停止監看' : ''}`
       : '尚未查詢';
 
   const byKey = new Map(rows.map((r) => [rowKey(r), r]));
@@ -348,7 +370,7 @@ function itemEl(w, row) {
   nm.textContent = w.room;
   const meta = document.createElement('span');
   meta.className = 'item-meta';
-  meta.textContent = `${w.shift}・${w.section}` + (w.doctor ? `・${w.doctor}` : '');
+  meta.textContent = `${w.shift}・${w.section}` + (w.doctor ? `・${w.doctor}` : '') + (w.enabled === false ? '・已停止監看' : '');
   top.append(nm, meta);
 
   const body = document.createElement('div');
@@ -531,6 +553,7 @@ function saveNum() {
   if (w) {
     const v = $('#num-input').value.trim();
     w.myNumber = v === '' ? null : Math.max(0, parseInt(v, 10) || 0);
+    w.enabled = true;
     w.nearThreshold = Math.max(1, parseInt($('#num-threshold').value, 10) || 3);
     w.notifyOnChange = $('#num-onchange').checked;
     // 換號碼後把已提醒紀錄清掉，才會用新號碼重新判斷
@@ -540,6 +563,7 @@ function saveNum() {
   }
   closeNumSheet();
   render();
+  updateWakeLock();
 }
 
 function removeWatch() {
